@@ -3,7 +3,8 @@
 
   team.py init [--prefix PROJ]
   team.py new <story|bug|chore|spike> "<title>"
-  team.py board
+  team.py board                  # text board
+  team.py serve [--port 7700]    # live board in the browser
   team.py start <stage> <ID>     # precondition, status, branch, context, executor
   team.py finish <stage> <ID>    # gates, advance or bounce
 """
@@ -158,17 +159,28 @@ def cmd_init(args):
 def cmd_new(args):
     if len(args) != 2 or args[0] not in DEFAULT_FLOWS:
         die(f"usage: new <{'|'.join(DEFAULT_FLOWS)}> \"<title>\"")
-    cfg = load_config()
-    kind, title = args[0], " ".join(args[1].split())  # one line, keeps frontmatter valid
+    print(create_ticket(load_config(), args[0], args[1]))
+
+
+def create_ticket(cfg, kind, title, description=""):
+    title = " ".join(title.split())  # one line, keeps frontmatter valid
+    if kind not in DEFAULT_FLOWS or not title:
+        raise ValueError(f"type must be one of {', '.join(DEFAULT_FLOWS)} and title non-empty")
     nums = [int(m.group(1)) for p in TICKETS.glob("*.md")
             if (m := re.match(rf"{cfg['prefix']}-(\d+)-", p.name))]
     tid = f"{cfg['prefix']}-{max(nums, default=0) + 1}"
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "ticket"
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    if len(slug) > 40:
+        slug = slug[:41].rsplit("-", 1)[0]
+    slug = slug or "ticket"
     path = TICKETS / f"{tid}-{slug}.md"
-    path.write_text(TEMPLATE.format(id=tid, type=kind, title=title))
+    text = TEMPLATE.format(id=tid, type=kind, title=title)
+    if description.strip():
+        text = text.replace("## Description\n", f"## Description\n{description.strip()}\n", 1)
+    path.write_text(text)
     meta, body = parse(path)
     write(path, meta, log(meta, body, "created → backlog"))
-    print(path)
+    return path
 
 
 def cmd_board(_):
@@ -194,6 +206,21 @@ def prerequisite(cfg, meta, stage):
     return "backlog" if i == 0 else STAGES[flow[i - 1]][1]
 
 
+def allowed_statuses(cfg, meta, stage):
+    allowed = {prerequisite(cfg, meta, stage), STAGES[stage][0]}
+    if stage == "build":
+        allowed.add("refined")  # bounce-backs from review/qa land here
+    return allowed
+
+
+def next_stage(cfg, meta):
+    """The stage this ticket can run now, or None (e.g. waiting on a stage not built yet)."""
+    for stage in cfg["flows"].get(meta["type"], []):
+        if stage in STAGES and meta["status"] in allowed_statuses(cfg, meta, stage):
+            return stage
+    return None
+
+
 def cmd_start(args):
     stage, tid = args
     if stage not in STAGES:
@@ -202,9 +229,7 @@ def cmd_start(args):
     path = find(tid)
     meta, body = parse(path)
     running, _, _ = STAGES[stage]
-    allowed = {prerequisite(cfg, meta, stage), running}
-    if stage == "build":
-        allowed.add("refined")  # bounce-backs from review/qa land here
+    allowed = allowed_statuses(cfg, meta, stage)
     if meta["status"] not in allowed:
         die(f"{tid} is '{meta['status']}', {stage} needs one of: {', '.join(sorted(allowed))}")
 
@@ -281,7 +306,10 @@ def cmd_finish(args):
     if gate and not problems:
         r = sh(gate["run"], ticket_env(meta, path))
         if r.returncode:
-            msg = f"gate `{gate['run']}` exited {r.returncode}\n{(r.stdout + r.stderr).strip()[-2000:]}"
+            out = (r.stdout + r.stderr).strip()
+            if len(out) > 3000:  # real errors are often at the top (xcodebuild), summaries at the bottom
+                out = out[:1500] + "\n… [middle truncated] …\n" + out[-1500:]
+            msg = f"gate `{gate['run']}` exited {r.returncode}\n{out}"
             mode = gate.get("mode", cfg["gate_default_mode"])
             (problems if mode == "block" else warnings).append(msg)
 
@@ -289,7 +317,8 @@ def cmd_finish(args):
         print(f"WARN (advancing anyway, gate mode is warn): {w}")
         body = log(meta, body, f"WARN {stage} gate failed: {gate['run']}")
     if problems:
-        body = log(meta, body, f"{running} → {failed} ({stage} gate failed: {problems[0].splitlines()[0]})")
+        reason = "user gate failed" if problems[0].startswith("gate `") else problems[0]
+        body = log(meta, body, f"{stage} gate failed → {failed}: {reason.splitlines()[0][:100]}")
         meta["status"] = failed
         write(path, meta, body)
         print(f"FAIL: {tid} → {failed}")
@@ -302,9 +331,86 @@ def cmd_finish(args):
     print(f"PASS: {tid} → {passed}")
 
 
+def ticket_json(cfg, path):
+    meta, body = parse(path)
+    log_lines = section(body, "Log").splitlines()
+    last = log_lines[-1][2:] if log_lines else ""
+    stage = next_stage(cfg, meta)
+    return {**meta, "body": body, "last": last, "failed": "gate failed" in last,
+            "next": f"/sprintkit:{stage} {meta['id']}" if stage else ""}
+
+
+def cmd_serve(args):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    port = int(args[args.index("--port") + 1]) if "--port" in args else 7700
+    load_config()  # fail now, not on first request
+    page = (Path(__file__).parent / "board.html").read_bytes()
+
+    class Handler(BaseHTTPRequestHandler):
+        def reply(self, code, body, ctype="application/json"):
+            data = body if isinstance(body, bytes) else json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def is_local(self):
+            # DNS-rebinding guard: a remote page can resolve its own domain to 127.0.0.1,
+            # but its requests still carry that domain in Host.
+            if (self.headers.get("Host") or "").rsplit(":", 1)[0] in ("127.0.0.1", "localhost"):
+                return True
+            self.reply(403, {"error": "forbidden host"})
+            return False
+
+        def do_GET(self):
+            if not self.is_local():
+                return
+            if self.path == "/":
+                return self.reply(200, page, "text/html; charset=utf-8")
+            if self.path != "/api/tickets":
+                return self.reply(404, {"error": "not found"})
+            try:
+                cfg = load_config()
+                tickets = [ticket_json(cfg, p) for p in sorted(TICKETS.glob("*.md"))]
+            except SystemExit as e:  # a ticket mid-write or hand-broken; next poll retries
+                return self.reply(500, {"error": str(e.code)})
+            self.reply(200, {"prefix": cfg["prefix"], "columns": BOARD_COLUMNS, "tickets": tickets})
+
+        def do_POST(self):
+            if not self.is_local():
+                return
+            # Browsers can't send application/json cross-origin without a CORS preflight,
+            # which this server never approves, so other sites can't plant tickets for agents to read.
+            if self.path != "/api/tickets" or self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+                return self.reply(400, {"error": "POST application/json to /api/tickets"})
+            try:
+                data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                if not isinstance(data, dict):
+                    raise ValueError("expected a JSON object")
+                cfg = load_config()
+                path = create_ticket(cfg, data.get("type", ""), str(data.get("title", "")),
+                                     str(data.get("description", "")))
+            except ValueError as e:
+                return self.reply(400, {"error": str(e)})
+            self.reply(201, ticket_json(cfg, path))
+
+        def log_message(self, *_):
+            pass
+
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError:
+        print(f"port {port} is in use. If the board is already running, it's at http://127.0.0.1:{port}")
+        return
+    print(f"sprintkit board: http://127.0.0.1:{server.server_port}", flush=True)
+    server.serve_forever()
+
+
 def main():
     cmds = {"init": cmd_init, "new": cmd_new, "board": cmd_board,
-            "start": cmd_start, "finish": cmd_finish}
+            "start": cmd_start, "finish": cmd_finish, "serve": cmd_serve}
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         die(__doc__)
     args = sys.argv[2:]

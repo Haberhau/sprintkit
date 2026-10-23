@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sprintkit board</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --col: #ecebe7; --card: #ffffff; --text: #1d1d1b; --muted: #6b6a66;
+    --line: #dcdbd6; --accent: #2f5bd3; --fail: #c4322b; --fail-bg: #fdecea; --flash: #fff4c2;
+    --story: #2f5bd3; --bug: #c4322b; --chore: #6b6a66; --spike: #8a4fc7; --on-accent: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --col: #1f1f1d; --card: #2a2a27; --text: #ecebe7; --muted: #9c9b96;
+      --line: #383834; --accent: #7d9cf0; --fail: #f07a72; --fail-bg: #3a1f1d; --flash: #4a4220;
+      --story: #7d9cf0; --bug: #f07a72; --chore: #9c9b96; --spike: #b993e6; --on-accent: #161615;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+           border-bottom: 1px solid var(--line); }
+  h1 { font-size: 16px; margin: 0; }
+  .status { color: var(--muted); font-size: 12px; margin-right: auto; }
+  .status.offline { color: var(--fail); }
+  button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); padding: 6px 12px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  button:focus-visible, .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  main { display: flex; gap: 12px; padding: 16px; overflow-x: auto; align-items: flex-start; }
+  .column { flex: 0 0 240px; background: var(--col); border-radius: 10px; padding: 10px; min-height: 120px; }
+  .column h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+               margin: 2px 4px 10px; display: flex; justify-content: space-between; }
+  .column.empty-future { opacity: .55; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+          margin-bottom: 8px; cursor: pointer; }
+  .card.moved { animation: arrive 1.6s ease-out; }
+  @keyframes arrive { 0% { background: var(--flash); transform: translateY(-6px); } 100% { background: var(--card); } }
+  @media (prefers-reduced-motion: reduce) { .card.moved { animation: none; } }
+  .row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .id { font-family: ui-monospace, Menlo, monospace; }
+  .type { font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  .points { margin-left: auto; border: 1px solid var(--line); border-radius: 10px; padding: 0 6px; }
+  .title { margin: 6px 0; font-weight: 500; }
+  .fail { background: var(--fail-bg); color: var(--fail); border-radius: 6px; padding: 4px 6px;
+          font-size: 12px; margin: 6px 0; }
+  .next { width: 100%; font-size: 12px; padding: 4px 8px; text-align: left; }
+  .next code { font-family: ui-monospace, Menlo, monospace; }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text);
+           padding: 20px; width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); }
+  dialog::backdrop { background: rgb(0 0 0 / .35); }
+  dialog h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
+  dialog ul { margin: 0; padding-left: 20px; }
+  dialog code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+  input, select, textarea { width: 100%; font: inherit; padding: 8px; border-radius: 6px;
+           border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  textarea { min-height: 110px; resize: vertical; }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .error { color: var(--fail); font-size: 12px; min-height: 1em; margin-top: 8px; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text);
+           color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0;
+           transition: opacity .2s; pointer-events: none; max-width: calc(100vw - 32px); }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="heading">sprintkit board</h1>
+  <span class="status" id="status" role="status">connecting…</span>
+  <button class="primary" id="new-btn">New ticket</button>
+</header>
+<main id="board" aria-label="Ticket board"></main>
+
+<dialog id="detail" aria-labelledby="detail-title"></dialog>
+
+<dialog id="create" aria-labelledby="create-title">
+  <form id="create-form" method="dialog">
+    <h2 id="create-title" style="margin:0;font-size:16px">New ticket</h2>
+    <label for="f-type">Type</label>
+    <select id="f-type" name="type">
+      <option value="story">Story: new behaviour, goes through refinement</option>
+      <option value="bug">Bug: something broken, straight to build</option>
+      <option value="chore">Chore: maintenance, straight to build</option>
+      <option value="spike">Spike: research, ends in a decision note</option>
+    </select>
+    <label for="f-title">Title</label>
+    <input id="f-title" name="title" required maxlength="120" autocomplete="off">
+    <label for="f-desc">Description <span style="font-weight:400">(what and why; for bugs: steps, expected, actual)</span></label>
+    <textarea id="f-desc" name="description"></textarea>
+    <div class="error" id="create-error" role="alert"></div>
+    <div class="actions">
+      <button type="button" id="create-cancel">Cancel</button>
+      <button type="submit" class="primary">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" aria-live="polite"></div>
+
+<script>
+const LABELS = { "in-progress": "In progress", "in-review": "In review", "in-qa": "In QA",
+                 "release-candidate": "Release candidate" };
+const BUILT = new Set(["backlog", "refining", "refined", "in-progress", "in-review"]);
+let lastStatus = null;   // id -> status from previous poll, null before first load
+let tickets = [];
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const label = (s) => LABELS[s] || s.charAt(0).toUpperCase() + s.slice(1);
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 3500);
+}
+
+async function copyNext(cmd) {
+  try { await navigator.clipboard.writeText(cmd); toast(`Copied ${cmd}. Paste it into Claude Code.`); }
+  catch { toast(`Run in Claude Code: ${cmd}`); }
+}
+
+function cardHTML(t, moved) {
+  const reason = t.failed ? t.last.replace(/^\S+ /, "") : "";
+  return `<article class="card${moved ? " moved" : ""}" tabindex="0" data-id="${esc(t.id)}" aria-label="${esc(t.id)} ${esc(t.title)}">
+    <div class="row"><span class="id">${esc(t.id)}</span>
+      <span class="type" style="color:var(--${esc(t.type)})">${esc(t.type)}</span>
+      ${t.points ? `<span class="points" title="points">${esc(t.points)}</span>` : ""}</div>
+    <div class="title">${esc(t.title)}</div>
+    ${t.failed ? `<div class="fail">✕ ${esc(reason)}</div>` : ""}
+    ${t.next ? `<button class="next" data-cmd="${esc(t.next)}">▶ <code>${esc(t.next)}</code></button>` : ""}
+  </article>`;
+}
+
+function render(data) {
+  $("heading").textContent = `sprintkit · ${data.prefix}`;
+  const extra = [...new Set(data.tickets.map((t) => t.status))].filter((s) => !data.columns.includes(s));
+  const cols = data.columns.concat(extra);
+  $("board").innerHTML = cols.map((col) => {
+    const items = data.tickets.filter((t) => t.status === col);
+    const future = !BUILT.has(col) && !items.length;
+    return `<section class="column${future ? " empty-future" : ""}" aria-label="${esc(label(col))}">
+      <h2><span>${esc(label(col))}</span><span>${items.length}</span></h2>
+      ${items.map((t) => cardHTML(t, lastStatus && lastStatus[t.id] !== t.status)).join("")}
+    </section>`;
+  }).join("");
+  lastStatus = Object.fromEntries(data.tickets.map((t) => [t.id, t.status]));
+}
+
+function renderBody(md) {
+  const out = []; let list = false;
+  const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+  for (const line of md.split("\n")) {
+    const item = line.match(/^- (\[( |x)\] )?(.*)$/);
+    if (item && !list) { out.push("<ul>"); list = true; }
+    if (!item && list) { out.push("</ul>"); list = false; }
+    if (line.startsWith("## ")) out.push(`<h3>${esc(line.slice(3))}</h3>`);
+    else if (item && item[1]) out.push(`<li style="list-style:none;margin-left:-20px"><input type="checkbox" disabled ${item[2] === "x" ? "checked" : ""} style="width:auto"> ${inline(item[3])}</li>`);
+    else if (item) out.push(`<li>${inline(item[3])}</li>`);
+    else if (line.trim()) out.push(`<p style="margin:4px 0">${inline(line)}</p>`);
+  }
+  if (list) out.push("</ul>");
+  return out.join("");
+}
+
+function openDetail(id) {
+  const t = tickets.find((x) => x.id === id);
+  if (!t) return;
+  // drop empty sections so the panel shows what has actually happened
+  const body = t.body.split(/(?=^## )/m).filter((s) => s.trim().split("\n").length > 1).join("");
+  const d = $("detail");
+  d.innerHTML = `<div class="row"><span class="id">${esc(t.id)}</span>
+      <span class="type" style="color:var(--${esc(t.type)})">${esc(t.type)}</span></div>
+    <h2 id="detail-title" style="margin:6px 0 8px;font-size:18px">${esc(t.title)}</h2>
+    <div class="meta"><span>Status: ${esc(label(t.status))}</span>
+      ${t.points ? `<span>Points: ${esc(t.points)}</span>` : ""}
+      ${t.branch ? `<span>Branch: <code>${esc(t.branch)}</code></span>` : ""}</div>
+    ${t.next ? `<p><button class="next" data-cmd="${esc(t.next)}">▶ <code>${esc(t.next)}</code></button></p>` : ""}
+    ${renderBody(body)}
+    <div class="actions"><button type="button" onclick="this.closest('dialog').close()">Close</button></div>`;
+  d.showModal();
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/tickets", { cache: "no-store" });
+    if (!r.ok) throw new Error();
+    const text = await r.text();
+    const data = JSON.parse(text);
+    tickets = data.tickets;
+    if (text !== poll.last) render(data);  // only redraw on change, keeps keyboard focus
+    poll.last = text;
+    $("status").textContent = `live · ${new Date().toLocaleTimeString()}`;
+    $("status").classList.remove("offline");
+  } catch {
+    $("status").textContent = "board server not reachable, retrying…";
+    $("status").classList.add("offline");
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const next = e.target.closest(".next");
+  if (next) { e.stopPropagation(); return copyNext(next.dataset.cmd); }
+  const card = e.target.closest(".card");
+  if (card) openDetail(card.dataset.id);
+});
+document.addEventListener("keydown", (e) => {
+  const card = e.target.closest?.(".card");
+  if (card && (e.key === "Enter" || e.key === " ") && !e.target.closest(".next")) { e.preventDefault(); openDetail(card.dataset.id); }
+});
+
+$("new-btn").onclick = () => { $("create-error").textContent = ""; $("create").showModal(); $("f-title").focus(); };
+$("create-cancel").onclick = () => $("create").close();
+$("create-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const r = await fetch("/api/tickets", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.fromEntries(f)) });
+  const res = await r.json();
+  if (!r.ok) { $("create-error").textContent = res.error; return; }
+  $("create").close(); e.target.reset();
+  toast(`Created ${res.id}`);
+  poll();
+};
+
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

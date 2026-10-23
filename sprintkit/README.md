@@ -23,6 +23,18 @@ Then, in your project:
 /sprintkit:board
 ```
 
+## The board
+
+`/sprintkit:board` starts a local board at `http://127.0.0.1:7700` (`/sprintkit:board text` for the terminal version).
+
+- Cards move by themselves as stages run, with a highlight when they arrive.
+- A failed gate shows on the card in red, with the reason.
+- **New ticket** creates tickets. Click a card for its full history.
+- The ▶ button on a card copies the next command, e.g. `/sprintkit:build APP-3`, to paste into Claude Code.
+- Cards can't be dragged between stages. They only move when a stage passes its gate.
+
+The server only listens on 127.0.0.1, rejects other `Host` headers, and only accepts JSON posts, so other websites can't create tickets.
+
 ## Bring your own team
 
 `.team/config.json`:

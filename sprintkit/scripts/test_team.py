@@ -28,6 +28,47 @@ def fill(path, name, text):
     path.write_text(s.replace(f"## {name}\n", f"## {name}\n{text}\n", 1))
 
 
+def check_server():
+    import urllib.error
+    import urllib.request
+    srv = subprocess.Popen([sys.executable, str(TEAM), "serve", "--port", "0"],
+                           stdout=subprocess.PIPE, text=True)
+    try:
+        base = srv.stdout.readline().split()[-1]
+
+        def req(path, data=None, ctype="application/json", host=None):
+            r = urllib.request.Request(base + path, data=data, headers={"Content-Type": ctype})
+            if host:
+                r.add_unredirected_header("Host", host)
+            try:
+                with urllib.request.urlopen(r) as resp:
+                    return resp.status, resp.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read()
+
+        code, page = req("/")
+        assert code == 200 and b"sprintkit board" in page
+        code, body = req("/api/tickets")
+        data = json.loads(body)
+        by_id = {t["id"]: t for t in data["tickets"]}
+        assert by_id["APP-1"]["status"] == "in-review" and by_id["APP-1"]["next"] == ""
+        assert by_id["APP-2"]["failed"]  # its last log line is the blocked build gate
+        assert not by_id["APP-3"]["failed"] and by_id["APP-3"]["next"] == "/sprintkit:build APP-3"
+
+        code, body = req("/api/tickets", json.dumps({"type": "story", "title": "From the board",
+                                                      "description": "made in the UI"}).encode())
+        made = json.loads(body)
+        assert code == 201 and made["id"] == "APP-4" and made["next"] == "/sprintkit:refine APP-4"
+        assert "made in the UI" in made["body"]
+
+        # a cross-site form post (no JSON content type) and a rebound Host are refused
+        assert req("/api/tickets", b"type=story&title=x", "application/x-www-form-urlencoded")[0] == 400
+        assert req("/api/tickets", host="evil.example:80")[0] == 403
+        assert req("/api/tickets", json.dumps({"type": "nope", "title": "x"}).encode())[0] == 400
+    finally:
+        srv.terminate()
+
+
 def main():
     with tempfile.TemporaryDirectory() as d:
         import os
@@ -102,6 +143,7 @@ def main():
 
         board = run("board")
         assert "IN-REVIEW (2)" in board and "IN-PROGRESS (1)" in board
+        check_server()
     print("all checks passed")
 
 
