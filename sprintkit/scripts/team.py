@@ -108,6 +108,14 @@ def write(path, meta, body):
     path.write_text(f"---\n{head}\n---\n{body}")
 
 
+def ticket_files():
+    """Ticket files in ID order: SK-2 before SK-10."""
+    def number(p):
+        m = re.match(r".*?-(\d+)-", p.name)
+        return int(m.group(1)) if m else 0
+    return sorted(TICKETS.glob("*.md"), key=number)
+
+
 def find(ticket_id):
     hits = list(TICKETS.glob(f"{ticket_id}-*.md"))
     if not hits:
@@ -189,7 +197,7 @@ def create_ticket(cfg, kind, title, description=""):
 
 def cmd_board(_):
     by_status = {}
-    for p in sorted(TICKETS.glob("*.md")):
+    for p in ticket_files():
         meta, _ = parse(p)
         by_status.setdefault(meta["status"], []).append(meta)
     if not by_status:
@@ -466,7 +474,7 @@ def cmd_serve(args):
                 return self.reply(404, {"error": "not found"})
             try:
                 cfg, queue = load_config(), read_queue()
-                tickets = [ticket_json(cfg, p, queue) for p in sorted(TICKETS.glob("*.md"))]
+                tickets = [ticket_json(cfg, p, queue) for p in ticket_files()]
             except (SystemExit, ValueError) as e:  # a file mid-write or hand-broken; next poll retries
                 return self.reply(500, {"error": str(getattr(e, "code", e))})
             self.reply(200, {"prefix": cfg["prefix"], "columns": BOARD_COLUMNS,

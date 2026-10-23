@@ -1,0 +1,15 @@
+{
+  "prefix": "SK",
+  "base_branch": "main",
+  "stages": {
+    "refine": {
+      "agent": "sprintkit:tech-lead"
+    },
+    "build": {
+      "agent": "sprintkit:developer"
+    }
+  },
+  "context": [],
+  "gates": {},
+  "gate_default_mode": "warn"
+}

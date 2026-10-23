@@ -305,6 +305,10 @@ def main():
         board = run("board")
         assert "IN-REVIEW (2)" in board and "IN-PROGRESS (1)" in board
         check_server()
+        for n in range(5, 11):
+            run("new", "chore", f"Filler {n}")
+        board = run("board")
+        assert board.index("APP-9 ") < board.index("APP-10 ")  # ID order, not alphabetical
     check_autopilot()
     check_setup()
     print("all checks passed")
