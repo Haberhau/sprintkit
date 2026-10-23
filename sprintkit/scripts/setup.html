@@ -43,6 +43,12 @@
   .choice.disabled { opacity: .55; cursor: not-allowed; }
   .stage-row { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: center; margin: 10px 0; }
   .stage-row .name { font-weight: 600; }
+  .skills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .skills select { flex: 1 1 100%; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 4px 2px 10px;
+          border-radius: 12px; background: var(--soft); font-family: ui-monospace, Menlo, monospace; }
+  .chip.off { color: var(--fail); }
+  .chip button { padding: 0 6px; border: 0; background: none; color: var(--muted); line-height: 1.4; }
   .soon { font-size: 11px; color: var(--muted); font-weight: 400; display: block; }
   .plugin { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
   .plugin:last-child { border-bottom: 0; }
@@ -85,7 +91,7 @@ const STAGES = [
 const SETTINGS = location.pathname === "/settings";  // same page edits an existing setup
 let info, step = 0;
 const state = { prefix: "", github: { mode: "skip", url: "", name: "", visibility: "private" },
-                stages: {}, original: {}, plugins: {}, context: [], contextOptions: [],
+                stages: {}, stageSkills: {}, original: {}, plugins: {}, context: [], contextOptions: [],
                 gate: { on: false, run: "", mode: "warn" }, attempts: 2 };
 
 const $ = (id) => document.getElementById(id);
@@ -100,7 +106,11 @@ async function load() {
   if (SETTINGS) {
     const c = info.config;
     state.prefix = c.prefix;
-    for (const [s] of STAGES) state.stages[s] = state.original[s] = c.stages?.[s] ? JSON.stringify(c.stages[s]) : "";
+    for (const [s] of STAGES) {
+      const ex = c.stages?.[s];  // an agent's skills get their own picker, so the dropdown sees the agent alone
+      state.stageSkills[s] = ex?.agent ? ex.skills || [] : [];
+      state.stages[s] = state.original[s] = ex ? JSON.stringify(ex.agent ? { agent: ex.agent } : ex) : "";
+    }
     state.context = [...(c.context || [])];
     for (const run of state.context)
       if (!state.contextOptions.some((o) => o.run === run)) state.contextOptions.push({ run, why: "from your config" });
@@ -113,7 +123,7 @@ async function load() {
     document.title = "sprintkit settings";
   } else {
     state.prefix = info.prefix;
-    for (const [s] of STAGES) state.stages[s] = info.defaults[s] ? JSON.stringify(info.defaults[s]) : "";
+    for (const [s] of STAGES) { state.stages[s] = info.defaults[s] ? JSON.stringify(info.defaults[s]) : ""; state.stageSkills[s] = []; }
     state.context = info.context.map((c) => c.run);
     if (info.checks.length) state.gate = { on: true, run: info.checks[0].run, mode: "warn" };
   }
@@ -155,6 +165,25 @@ function stageSelect(stage) {
       opt(JSON.stringify({ [k]: x.id }), `${x.id}${k === "skill" ? " (skill)" : ""}`, x.description)).join("")}</optgroup>`).join("")}
   </select>`;
 }
+function skillGroups() {
+  return executorGroups().map(([label, items]) => [label, items.filter(([k]) => k === "skill").map(([, x]) => x)])
+                         .filter(([, items]) => items.length);
+}
+const isAgent = (stage) => !!state.stages[stage] && "agent" in JSON.parse(state.stages[stage]);
+function skillPicker(stage) {  // extra skills the stage's agent is told to use
+  if (!isAgent(stage)) return "";
+  const groups = skillGroups();
+  const have = new Set(groups.flatMap(([, items]) => items.map((x) => x.id)));
+  const picked = state.stageSkills[stage];
+  return `<div class="skills">${picked.map((id) => `<span class="chip${have.has(id) ? "" : " off"}"
+      ${have.has(id) ? "" : 'title="Not installed or plugin switched off: dropped on save"'}>${esc(id)}${have.has(id) ? "" : " (not available)"}
+      <button type="button" data-unskill="${stage}" data-id="${esc(id)}" aria-label="Remove ${esc(id)}">×</button></span>`).join("")}
+    <select id="addskill-${stage}" data-addskill="${stage}" aria-label="Add a skill the ${stage} agent must use">
+      <option value="">${picked.length ? "+ Add another skill…" : "+ Add skills the agent must use (optional)…"}</option>
+      ${groups.map(([label, items]) => `<optgroup label="${esc(label)}">${items.filter((x) => !picked.includes(x.id)).map((x) =>
+        `<option value="${esc(x.id)}" title="${esc(x.description)}">${esc(x.id)}</option>`).join("")}</optgroup>`).join("")}
+    </select></div>`;
+}
 
 // ---------- steps ----------
 const views = [
@@ -193,7 +222,7 @@ const views = [
     <p class="hint">Choose who does each stage: the sprintkit defaults, any agent or skill you have installed, or you.</p>
     ${STAGES.map(([s, desc, soon]) => `<div class="stage-row"><label class="name" for="stage-${s}">${s}
         ${soon ? '<span class="soon">stage coming soon</span>' : ""}</label>
-      <div>${stageSelect(s)}<div class="hint" id="desc-${s}" style="margin:4px 0 0">${desc}</div></div></div>`).join("")}
+      <div>${stageSelect(s)}${skillPicker(s)}<div class="hint" id="desc-${s}" style="margin:4px 0 0">${desc}</div></div></div>`).join("")}
     <h2 style="margin-top:24px">Plugins in this project</h2>
     <p class="hint">Switch off what this project doesn't need: fewer skills loaded means less noise and fewer tokens.
       Saved to <code>.claude/settings.json</code>, which overrides your user settings in this project only.</p>
@@ -242,7 +271,12 @@ const views = [
 
 function buildPayload() {
   const stages = {};
-  for (const [s] of STAGES) if (state.stages[s]) stages[s] = JSON.parse(state.stages[s]);
+  const have = new Set(skillGroups().flatMap(([, items]) => items.map((x) => x.id)));
+  for (const [s] of STAGES) {
+    if (!state.stages[s]) continue;
+    const skills = isAgent(s) ? state.stageSkills[s].filter((id) => have.has(id)) : [];
+    stages[s] = { ...JSON.parse(state.stages[s]), ...(skills.length && { skills }) };
+  }
   return { prefix: state.prefix, stages, context: state.context, plugins: state.plugins, autopilot: { max_attempts: state.attempts },
            gates: state.gate.on && state.gate.run.trim() ? { build: { run: state.gate.run, mode: state.gate.mode } } : {},
            github: state.github.mode === "create" ? { mode: "create", name: state.github.name, visibility: state.github.visibility }
@@ -287,7 +321,8 @@ document.addEventListener("change", (e) => {
   const t = e.target;
   if (t.name === "gh") { state.github.mode = t.value; render(); }
   if (t.id === "gh-vis") state.github.visibility = t.value;
-  if (t.dataset.stage) state.stages[t.dataset.stage] = t.value;
+  if (t.dataset.stage) { state.stages[t.dataset.stage] = t.value; render(); $(t.id).focus(); }
+  if (t.dataset.addskill && t.value) { state.stageSkills[t.dataset.addskill].push(t.value); render(); $(t.id).focus(); }
   if (t.dataset.plugin) { state.plugins[t.dataset.plugin] = t.checked; render(); }
   if (t.dataset.context !== undefined) {
     const run = state.contextOptions[+t.dataset.context].run;
@@ -298,6 +333,8 @@ document.addEventListener("change", (e) => {
   if (t.id === "attempts") state.attempts = +t.value;
 });
 document.addEventListener("click", (e) => {
+  const u = e.target.dataset.unskill;
+  if (u) { state.stageSkills[u] = state.stageSkills[u].filter((id) => id !== e.target.dataset.id); render(); $(`addskill-${u}`).focus(); return; }
   if (e.target.id !== "ctx-add") return;
   const run = $("ctx-new").value.trim();
   if (!run) return;
