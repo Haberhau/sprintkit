@@ -5,6 +5,8 @@
   team.py new <story|bug|chore|spike> "<title>"
   team.py board                  # text board
   team.py serve [--port 7700]    # live board in the browser
+  team.py queue [add|remove <ID>]  # sprint queue for the autopilot
+  team.py next                   # next (stage, ticket) for the autopilot
   team.py start <stage> <ID>     # precondition, status, branch, context, executor
   team.py finish <stage> <ID>    # gates, advance or bounce
 """
@@ -19,6 +21,7 @@ from pathlib import Path
 TEAM = Path(".team")
 TICKETS = TEAM / "tickets"
 CONFIG = TEAM / "config.json"
+QUEUE = TEAM / "queue.json"
 
 # stage -> (status while running, status on pass, status on fail)
 STAGES = {
@@ -44,6 +47,7 @@ DEFAULT_CONFIG = {
     "gates": {},
     "gate_default_mode": "warn",
     "flows": DEFAULT_FLOWS,
+    "autopilot": {"max_attempts": 2},
 }
 BOARD_COLUMNS = ["backlog", "refining", "refined", "in-progress", "in-review",
                  "in-qa", "done", "release-candidate", "released"]
@@ -240,7 +244,7 @@ def cmd_start(args):
                 die(f"{m['id']} is already in-progress, finish it first (solo: one at a time)")
         branch = meta.get("branch") or path.stem
         exists = sh(f"git rev-parse --verify --quiet refs/heads/{branch}").returncode == 0
-        git("checkout", *([] if exists else ["-b"]), branch)
+        git("checkout", branch) if exists else git("checkout", "-b", branch, cfg["base_branch"])
         meta["branch"] = branch
 
     resumed = meta["status"] == running
@@ -331,20 +335,103 @@ def cmd_finish(args):
     print(f"PASS: {tid} → {passed}")
 
 
-def ticket_json(cfg, path):
+# ---------- sprint queue + autopilot ----------
+
+def read_queue():
+    return json.loads(QUEUE.read_text()) if QUEUE.exists() else []
+
+
+def queue_add(tid):
+    path = find(tid)
+    q = read_queue()
+    if tid not in q:
+        q.append(tid)
+        QUEUE.write_text(json.dumps(q) + "\n")
+    meta, body = parse(path)
+    meta["blocked"] = "false"  # re-queueing a blocked ticket means "try again"
+    write(path, meta, log(meta, body, "queued"))
+
+
+def queue_remove(tid, q=None):
+    q = read_queue() if q is None else q
+    if tid in q:
+        q.remove(tid)
+        QUEUE.write_text(json.dumps(q) + "\n")
+
+
+def cmd_queue(args):
+    if len(args) == 2 and args[0] in ("add", "remove"):
+        (queue_add if args[0] == "add" else queue_remove)(args[1])
+    elif args:
+        die("usage: queue [add|remove <ID>]")
+    print(" ".join(read_queue()) or "queue is empty")
+
+
+def failed_attempts(body, stage):
+    """Failures of this stage since the ticket was last queued or last passed it."""
+    count = 0
+    passed = STAGES[stage][1]
+    for line in section(body, "Log").splitlines():
+        if line.endswith(" queued") or f"→ {passed}" in line.split(" gate failed")[0]:
+            count = 0
+        elif f" {stage} gate failed" in line:
+            count += 1
+    return count
+
+
+def block(path, meta, body, reason):
+    meta["blocked"] = "true"
+    write(path, meta, log(meta, body, f"blocked: {reason}"))
+
+
+def cmd_next(_):
+    cfg = load_config()
+    limit = cfg["autopilot"].get("max_attempts", 2)
+    q = read_queue()
+    for tid in list(q):
+        hits = list(TICKETS.glob(f"{tid}-*.md"))
+        if not hits:
+            queue_remove(tid, q)
+            print(f"DEQUEUED: {tid} (ticket file is gone)")
+            continue
+        meta, body = parse(hits[0])
+        stage = next_stage(cfg, meta)
+        reason = None
+        if not stage:
+            queue_remove(tid, q)
+            print(f"DEQUEUED: {tid} is '{meta['status']}', nothing more the autopilot can run")
+            continue
+        if cfg["stages"].get(stage, {}).get("human"):
+            reason = f"{stage} is set to a human executor"
+        elif (n := failed_attempts(body, stage)) >= limit:
+            reason = f"{stage} gate failed {n}x, needs a look"
+        if reason:
+            block(hits[0], meta, body, reason)
+            queue_remove(tid, q)
+            print(f"BLOCKED: {tid} ({reason})")
+            continue
+        print(f"NEXT: {stage} {tid}")
+        return
+    print("NEXT: none")
+
+
+def ticket_json(cfg, path, queue=()):
     meta, body = parse(path)
     log_lines = section(body, "Log").splitlines()
     last = log_lines[-1][2:] if log_lines else ""
     stage = next_stage(cfg, meta)
-    return {**meta, "body": body, "last": last, "failed": "gate failed" in last,
+    return {**meta, "body": body, "last": last,
+            "failed": "gate failed" in last or meta.get("blocked") == "true",
+            "queued": queue.index(meta["id"]) + 1 if meta["id"] in queue else 0,
             "next": f"/sprintkit:{stage} {meta['id']}" if stage else ""}
 
 
 def cmd_serve(args):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import wizard
     port = int(args[args.index("--port") + 1]) if "--port" in args else 7700
-    load_config()  # fail now, not on first request
-    page = (Path(__file__).parent / "board.html").read_bytes()
+    here = Path(__file__).parent
+    board, setup = (here / "board.html").read_bytes(), (here / "setup.html").read_bytes()
 
     class Handler(BaseHTTPRequestHandler):
         def reply(self, code, body, ctype="application/json"):
@@ -365,36 +452,67 @@ def cmd_serve(args):
             return False
 
         def do_GET(self):
+            self.path = self.path.split("?", 1)[0]  # route on the path; /?saved=1 is still /
             if not self.is_local():
                 return
-            if self.path == "/":
-                return self.reply(200, page, "text/html; charset=utf-8")
+            if self.path == "/":  # no config yet → the setup wizard, afterwards the board
+                return self.reply(200, board if CONFIG.exists() else setup, "text/html; charset=utf-8")
+            if self.path == "/settings":  # same page as setup, in settings mode
+                return self.reply(200, setup, "text/html; charset=utf-8")
+            if self.path == "/api/setup":
+                return self.reply(200, {**wizard.discover(Path.cwd()), "configured": CONFIG.exists(),
+                                        "config": wizard.read_json(CONFIG)})
             if self.path != "/api/tickets":
                 return self.reply(404, {"error": "not found"})
             try:
-                cfg = load_config()
-                tickets = [ticket_json(cfg, p) for p in sorted(TICKETS.glob("*.md"))]
-            except SystemExit as e:  # a ticket mid-write or hand-broken; next poll retries
-                return self.reply(500, {"error": str(e.code)})
-            self.reply(200, {"prefix": cfg["prefix"], "columns": BOARD_COLUMNS, "tickets": tickets})
+                cfg, queue = load_config(), read_queue()
+                tickets = [ticket_json(cfg, p, queue) for p in sorted(TICKETS.glob("*.md"))]
+            except (SystemExit, ValueError) as e:  # a file mid-write or hand-broken; next poll retries
+                return self.reply(500, {"error": str(getattr(e, "code", e))})
+            self.reply(200, {"prefix": cfg["prefix"], "columns": BOARD_COLUMNS,
+                             "tickets": tickets, "queue": queue})
 
         def do_POST(self):
+            self.path = self.path.split("?", 1)[0]
             if not self.is_local():
                 return
             # Browsers can't send application/json cross-origin without a CORS preflight,
             # which this server never approves, so other sites can't plant tickets for agents to read.
-            if self.path != "/api/tickets" or self.headers.get("Content-Type", "").split(";")[0] != "application/json":
-                return self.reply(400, {"error": "POST application/json to /api/tickets"})
+            if self.path not in ("/api/tickets", "/api/queue", "/api/setup", "/api/settings") or \
+                    self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+                return self.reply(400, {"error": "POST application/json to /api/tickets, /api/queue, "
+                                                 "/api/setup or /api/settings"})
+            if self.path in ("/api/setup", "/api/settings"):
+                # setup only before there's a config, settings only after
+                if CONFIG.exists() == (self.path == "/api/setup"):
+                    return self.reply(409, {"error": "already set up" if CONFIG.exists() else "not set up yet"})
+                action = wizard.apply if self.path == "/api/setup" else wizard.update
+                try:
+                    data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                    return self.reply(200, {"steps": action(Path.cwd(), data, CONFIG)})
+                except ValueError as e:
+                    return self.reply(400, {"error": str(e)})
             try:
                 data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
                 if not isinstance(data, dict):
                     raise ValueError("expected a JSON object")
                 cfg = load_config()
+                if self.path == "/api/queue":
+                    tid = str(data.get("id", ""))
+                    if not re.fullmatch(r"[A-Za-z0-9_-]+-\d+", tid):
+                        raise ValueError("bad ticket id")
+                    if data.get("action") == "remove":
+                        queue_remove(tid)
+                    else:
+                        queue_add(tid)
+                    return self.reply(200, {"queue": read_queue()})
                 path = create_ticket(cfg, data.get("type", ""), str(data.get("title", "")),
                                      str(data.get("description", "")))
             except ValueError as e:
                 return self.reply(400, {"error": str(e)})
-            self.reply(201, ticket_json(cfg, path))
+            except SystemExit as e:  # find() on an unknown id
+                return self.reply(404, {"error": str(e.code)})
+            self.reply(201, ticket_json(cfg, path, read_queue()))
 
         def log_message(self, *_):
             pass
@@ -410,7 +528,8 @@ def cmd_serve(args):
 
 def main():
     cmds = {"init": cmd_init, "new": cmd_new, "board": cmd_board,
-            "start": cmd_start, "finish": cmd_finish, "serve": cmd_serve}
+            "start": cmd_start, "finish": cmd_finish, "serve": cmd_serve,
+            "queue": cmd_queue, "next": cmd_next}
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         die(__doc__)
     args = sys.argv[2:]

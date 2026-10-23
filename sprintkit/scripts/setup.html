@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sprintkit setup</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6a66; --line: #dcdbd6;
+    --accent: #2f5bd3; --on-accent: #ffffff; --ok: #2a7a3b; --fail: #c4322b; --fail-bg: #fdecea; --soft: #ecebe7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #232321; --text: #ecebe7; --muted: #9c9b96; --line: #383834;
+      --accent: #7d9cf0; --on-accent: #161615; --ok: #7cc98a; --fail: #f07a72; --fail-bg: #3a1f1d; --soft: #2c2c29;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  ol.steps { display: flex; gap: 6px; list-style: none; padding: 0; margin: 0 0 16px; flex-wrap: wrap; }
+  ol.steps li { font-size: 12px; color: var(--muted); padding: 4px 10px; border-radius: 12px; background: var(--soft); }
+  ol.steps li.on { background: var(--accent); color: var(--on-accent); }
+  ol.steps li.done { color: var(--text); }
+  section.panel + section.panel { margin-top: 16px; }
+  section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  h2 { font-size: 16px; margin: 0 0 4px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 2px 0 12px; }
+  label.field { display: block; font-size: 12px; color: var(--muted); margin: 14px 0 4px; }
+  input[type=text], select, textarea { width: 100%; font: inherit; padding: 8px; border-radius: 6px;
+           border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  code, .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 8px 0; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+  .choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--line);
+            border-radius: 8px; margin: 8px 0; cursor: pointer; }
+  .choice input { margin-top: 3px; }
+  .choice .sub2 { color: var(--muted); font-size: 12px; }
+  .choice.disabled { opacity: .55; cursor: not-allowed; }
+  .stage-row { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: center; margin: 10px 0; }
+  .stage-row .name { font-weight: 600; }
+  .soon { font-size: 11px; color: var(--muted); font-weight: 400; display: block; }
+  .plugin { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .plugin:last-child { border-bottom: 0; }
+  .plugin .meta { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .box { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; }
+  .gate { display: grid; grid-template-columns: 1fr 110px; gap: 8px; }
+  .nav { display: flex; justify-content: space-between; margin-top: 20px; gap: 8px; }
+  button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); padding: 8px 16px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow: auto; font-size: 12px; }
+  .error { color: var(--fail); background: var(--fail-bg); border-radius: 6px; padding: 8px 10px; margin-top: 12px; }
+  .result li { margin: 4px 0; list-style: none; } .result { padding: 0; }
+  .ok { color: var(--ok); } .bad { color: var(--fail); }
+  @media (max-width: 560px) { .stage-row { grid-template-columns: 1fr; } .gate { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Set up sprintkit</h1>
+  <p class="sub" id="subtitle">Plan, build and ship this project like a team. Takes about a minute.</p>
+  <ol class="steps" id="steps" aria-label="Setup steps"></ol>
+  <div id="panel" aria-live="polite"><section class="panel"><p>Looking at this project…</p></section></div>
+  <div class="nav" id="nav" hidden>
+    <button id="back" type="button">Back</button>
+    <button id="next" type="button" class="primary">Next</button>
+  </div>
+</div>
+
+<script>
+const STEPS = ["Project", "GitHub", "Team", "Checks", "Review"];
+const STAGES = [
+  ["refine", "Turns a backlog ticket into acceptance criteria, technical notes and an estimate."],
+  ["build", "Implements a refined ticket on its own branch and commits it."],
+  ["review", "Reviews the branch against the acceptance criteria.", true],
+  ["qa", "Tests every acceptance criterion and files bugs.", true],
+];
+const SETTINGS = location.pathname === "/settings";  // same page edits an existing setup
+let info, step = 0;
+const state = { prefix: "", github: { mode: "skip", url: "", name: "", visibility: "private" },
+                stages: {}, original: {}, plugins: {}, context: [], contextOptions: [],
+                gate: { on: false, run: "", mode: "warn" }, attempts: 2 };
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function load() {
+  info = await (await fetch("/api/setup")).json();
+  if (info.configured !== SETTINGS) { location.href = "/"; return; }  // setup once, settings after
+  state.github = { mode: info.git.remote ? "keep" : "skip", url: "", name: info.folderName.toLowerCase().replace(/[^a-z0-9._-]+/g, "-"), visibility: "private" };
+  for (const p of info.plugins) state.plugins[p.id] = p.enabled;
+  state.contextOptions = [...info.context];
+  if (SETTINGS) {
+    const c = info.config;
+    state.prefix = c.prefix;
+    for (const [s] of STAGES) state.stages[s] = state.original[s] = c.stages?.[s] ? JSON.stringify(c.stages[s]) : "";
+    state.context = [...(c.context || [])];
+    for (const run of state.context)
+      if (!state.contextOptions.some((o) => o.run === run)) state.contextOptions.push({ run, why: "from your config" });
+    const g = c.gates?.build;
+    state.gate = g ? { on: true, run: g.run, mode: g.mode || c.gate_default_mode || "warn" }
+                   : { on: false, run: info.checks[0]?.run || "", mode: "warn" };
+    state.attempts = c.autopilot?.max_attempts ?? 2;
+    $("title").textContent = `Settings · ${c.prefix}`;
+    $("subtitle").innerHTML = `Ticket prefix <code>${esc(c.prefix)}</code> and base branch <code>${esc(c.base_branch)}</code> stay fixed: existing tickets and branches depend on them.`;
+    document.title = "sprintkit settings";
+  } else {
+    state.prefix = info.prefix;
+    for (const [s] of STAGES) state.stages[s] = info.defaults[s] ? JSON.stringify(info.defaults[s]) : "";
+    state.context = info.context.map((c) => c.run);
+    if (info.checks.length) state.gate = { on: true, run: info.checks[0].run, mode: "warn" };
+  }
+  $("nav").hidden = false;  // no Next before the project has been looked at
+  render();
+}
+
+// ---------- executors for the stage dropdowns ----------
+function executorGroups() {
+  const groups = [["sprintkit (defaults)", info.sprintkit.agents.map((a) => ["agent", a])]];
+  for (const p of info.plugins) {
+    if (!state.plugins[p.id]) continue;  // switched off for this project → not offered
+    groups.push([`${p.name} plugin`, [...p.agents.map((a) => ["agent", a]), ...p.skills.map((s) => ["skill", s])]]);
+  }
+  groups.push(["Your agents and skills", [...info.user.agents.map((a) => ["agent", a]), ...info.user.skills.map((s) => ["skill", s]),
+                                          ...info.project.agents.map((a) => ["agent", a]), ...info.project.skills.map((s) => ["skill", s])]]);
+  groups.push(["Built in", [["agent", { id: "general-purpose", description: "Claude Code's general-purpose agent" }]]]);
+  return groups.filter(([, items]) => items.length);
+}
+function describe(ex) {  // readable label for executors the dropdown has no entry for
+  if (ex.command) return `run ${ex.command}`;
+  const who = ex.agent || ex.skill;
+  return ex.skills?.length ? `${who} using ${ex.skills.join(", ")}` : `${who} (not installed)`;
+}
+function stageSelect(stage) {
+  const groups = executorGroups();
+  const values = new Set(groups.flatMap(([, items]) => items.map(([k, x]) => JSON.stringify({ [k]: x.id }))));
+  values.add(JSON.stringify({ human: true })); values.add("");
+  const custom = state.original[stage] && !values.has(state.original[stage]) ? state.original[stage] : "";
+  if (!values.has(state.stages[stage]) && state.stages[stage] !== custom)
+    state.stages[stage] = info.defaults[stage] ? JSON.stringify(info.defaults[stage]) : "";
+  const opt = (value, text, title = "") =>
+    `<option value="${esc(value)}" ${state.stages[stage] === value ? "selected" : ""} title="${esc(title)}">${esc(text)}</option>`;
+  return `<select id="stage-${stage}" data-stage="${stage}" aria-describedby="desc-${stage}">
+    ${custom ? opt(custom, `Current: ${describe(JSON.parse(custom))}`, "From your config, kept as is") : ""}
+    ${opt("", "Not set (this stage won't run)")}
+    ${opt(JSON.stringify({ human: true }), "Me: I do this stage myself")}
+    ${groups.map(([label, items]) => `<optgroup label="${esc(label)}">${items.map(([k, x]) =>
+      opt(JSON.stringify({ [k]: x.id }), `${x.id}${k === "skill" ? " (skill)" : ""}`, x.description)).join("")}</optgroup>`).join("")}
+  </select>`;
+}
+
+// ---------- steps ----------
+const views = [
+  () => `<h2>Project</h2>
+    <p class="hint">sprintkit works in the folder this Claude Code session runs in.</p>
+    <dl class="kv"><dt>Folder</dt><dd class="mono">${esc(info.folder)}</dd>
+      <dt>Git</dt><dd>${info.git.isRepo
+        ? `Repository on <code>${esc(info.git.branch)}</code>${info.git.hasCommits ? "" : ", no commits yet. Setup makes an empty first commit so ticket branches have a base."}`
+        : "Not a git repository yet. Setup runs <code>git init</code> and makes an empty first commit."}</dd></dl>
+    <label class="field" for="prefix">Ticket prefix (tickets will be ${esc(state.prefix || "…")}-1, ${esc(state.prefix || "…")}-2, …)</label>
+    <input type="text" id="prefix" value="${esc(state.prefix)}" maxlength="10" autocomplete="off" spellcheck="false">`,
+
+  () => {
+    if (info.git.remote) return `<h2>GitHub</h2><p>Already connected to <code>${esc(info.git.remote)}</code>. Nothing to do here.</p>`;
+    const gh = info.gh.authed;
+    const radio = (mode, title, body, disabled = false) => `<label class="choice${disabled ? " disabled" : ""}">
+      <input type="radio" name="gh" value="${mode}" ${state.github.mode === mode ? "checked" : ""} ${disabled ? "disabled" : ""}>
+      <span><strong>${title}</strong><span class="sub2"><br>${body}</span></span></label>`;
+    return `<h2>GitHub</h2><p class="hint">Where this project's code lives online. You can do this later too.</p>
+      ${radio("link", "Link an existing repository", "Adds it as <code>origin</code>. Nothing is pushed.")}
+      ${state.github.mode === "link" ? `<label class="field" for="gh-url">Repository URL</label>
+        <input type="text" id="gh-url" value="${esc(state.github.url)}" placeholder="https://github.com/you/project" autocomplete="off" spellcheck="false">` : ""}
+      ${radio("create", "Create a new repository",
+        gh ? "Creates it on your GitHub account and <strong>pushes the current commits</strong> to it."
+           : info.gh.installed ? "Sign in first: run <code>gh auth login</code> in a terminal, then reload this page."
+                               : "Needs the GitHub CLI (<code>brew install gh</code>, then <code>gh auth login</code>).", !gh)}
+      ${state.github.mode === "create" ? `<div class="gate"><div><label class="field" for="gh-name">Repository name</label>
+          <input type="text" id="gh-name" value="${esc(state.github.name)}" autocomplete="off" spellcheck="false"></div>
+        <div><label class="field" for="gh-vis">Visibility</label><select id="gh-vis">
+          <option value="private" ${state.github.visibility === "private" ? "selected" : ""}>Private</option>
+          <option value="public" ${state.github.visibility === "public" ? "selected" : ""}>Public</option></select></div></div>` : ""}
+      ${radio("skip", "Skip for now", "Everything works locally. Link a repo whenever you like.")}`;
+  },
+
+  () => `<h2>Your team</h2>
+    <p class="hint">Choose who does each stage: the sprintkit defaults, any agent or skill you have installed, or you.</p>
+    ${STAGES.map(([s, desc, soon]) => `<div class="stage-row"><label class="name" for="stage-${s}">${s}
+        ${soon ? '<span class="soon">stage coming soon</span>' : ""}</label>
+      <div>${stageSelect(s)}<div class="hint" id="desc-${s}" style="margin:4px 0 0">${desc}</div></div></div>`).join("")}
+    <h2 style="margin-top:24px">Plugins in this project</h2>
+    <p class="hint">Switch off what this project doesn't need: fewer skills loaded means less noise and fewer tokens.
+      Saved to <code>.claude/settings.json</code>, which overrides your user settings in this project only.</p>
+    ${info.plugins.length ? `<div class="box">${info.plugins.map((p) => `<label class="plugin">
+        <input type="checkbox" data-plugin="${esc(p.id)}" ${state.plugins[p.id] ? "checked" : ""}>
+        <span><strong>${esc(p.name)}</strong> <span class="mono" style="color:var(--muted)">${esc(p.id)}</span></span>
+        <span class="meta">${p.skills.length} skills · ${p.agents.length} agents</span></label>`).join("")}</div>`
+      : '<p class="hint">No plugins installed besides sprintkit.</p>'}`,
+
+  () => `<h2>Checks</h2>
+    <p class="hint">Context runs before every stage and is handed to the executor. A gate runs after build: in <em>warn</em> mode a failure is logged and the ticket moves on, in <em>block</em> mode it stays until the gate passes.</p>
+    <h3 style="font-size:14px;margin:16px 0 4px">Context</h3>
+    ${state.contextOptions.map((c, i) => `<label class="choice"><input type="checkbox" data-context="${i}" ${state.context.includes(c.run) ? "checked" : ""}>
+      <span><code>${esc(c.run)}</code><span class="sub2"><br>${esc(c.why)}</span></span></label>`).join("")
+      || '<p class="hint">Nothing detected. Tools like graphify show up here when installed.</p>'}
+    <div class="gate"><div><label class="field" for="ctx-new">Add a context command (ticket data comes in as $TICKET_ID, $TICKET_TITLE, $TICKET_PATH)</label>
+      <input type="text" id="ctx-new" class="mono" autocomplete="off" spellcheck="false" placeholder='rg -l "$TICKET_TITLE"'></div>
+      <div style="align-self:end"><button type="button" id="ctx-add">Add</button></div></div>
+    <h3 style="font-size:14px;margin:16px 0 4px">Build gate</h3>
+    <label class="choice"><input type="checkbox" id="gate-on" ${state.gate.on ? "checked" : ""}>
+      <span><strong>Run a check after every build</strong>${info.checks.length ? `<span class="sub2"><br>Detected: ${info.checks.map((c) => esc(c.why)).join("; ")}</span>` : ""}</span></label>
+    ${state.gate.on ? `<div class="gate"><div><label class="field" for="gate-run">Command</label>
+        <input type="text" id="gate-run" list="gate-list" value="${esc(state.gate.run)}" autocomplete="off" spellcheck="false" class="mono">
+        <datalist id="gate-list">${info.checks.map((c) => `<option value="${esc(c.run)}">`).join("")}</datalist></div>
+      <div><label class="field" for="gate-mode">Mode</label><select id="gate-mode">
+        <option value="warn" ${state.gate.mode === "warn" ? "selected" : ""}>Warn</option>
+        <option value="block" ${state.gate.mode === "block" ? "selected" : ""}>Block</option></select></div></div>` : ""}
+    ${SETTINGS ? `<h3 style="font-size:14px;margin:20px 0 4px">Autopilot</h3>
+      <label class="field" for="attempts">Failed attempts at the same stage before <code>/sprintkit:sprint</code> blocks a ticket</label>
+      <select id="attempts" style="max-width:120px">${[1, 2, 3, 4, 5].map((n) =>
+        `<option ${state.attempts === n ? "selected" : ""}>${n}</option>`).join("")}</select>` : ""}`,
+
+  () => {
+    const payload = buildPayload();
+    const gh = { keep: `keep <code>${esc(info.git.remote)}</code>`, skip: "skip", link: `link <code>${esc(state.github.url)}</code>`,
+                 create: `create ${esc(state.github.visibility)} repo <code>${esc(state.github.name)}</code> and push` }[state.github.mode];
+    const off = Object.entries(state.plugins).filter(([, v]) => !v).map(([k]) => k);
+    return `<h2>Review</h2><p class="hint">Nothing has changed yet. This is what "Create project" will do:</p>
+      <ul>${!info.git.isRepo ? "<li><code>git init</code> and an empty first commit</li>" : !info.git.hasCommits ? "<li>an empty first commit</li>" : ""}
+        <li>write <code>.team/config.json</code>:</li></ul>
+      <pre>${esc(JSON.stringify({ prefix: payload.prefix, stages: payload.stages, context: payload.context, gates: payload.gates }, null, 2))}</pre>
+      <ul>${Object.keys(state.plugins).length ? `<li>write <code>.claude/settings.json</code>: plugins ${off.length ? `switched off here: ${off.map((o) => `<code>${esc(o)}</code>`).join(", ")}` : "all on"}</li>` : ""}
+        <li>GitHub: ${gh}</li></ul>`;
+  },
+];
+
+function buildPayload() {
+  const stages = {};
+  for (const [s] of STAGES) if (state.stages[s]) stages[s] = JSON.parse(state.stages[s]);
+  return { prefix: state.prefix, stages, context: state.context, plugins: state.plugins, autopilot: { max_attempts: state.attempts },
+           gates: state.gate.on && state.gate.run.trim() ? { build: { run: state.gate.run, mode: state.gate.mode } } : {},
+           github: state.github.mode === "create" ? { mode: "create", name: state.github.name, visibility: state.github.visibility }
+                 : state.github.mode === "link" ? { mode: "link", url: state.github.url.trim() } : { mode: state.github.mode } };
+}
+
+function check(step) {  // per-step validation, mirrors the server's
+  if (step === 0 && !/^[A-Z][A-Z0-9]{0,9}$/.test(state.prefix)) return "Prefix: 1 to 10 capital letters or digits, starting with a letter.";
+  if (step === 1 && state.github.mode === "link" && !/^(https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+$/.test(state.github.url.trim()))
+    return "That doesn't look like a GitHub repository URL (https://github.com/owner/repo).";
+  if (step === 1 && state.github.mode === "create" && !/^([\w.-]+\/)?[\w.-]+$/.test(state.github.name)) return "Repository name: letters, digits, dots, dashes, underscores.";
+  if (step === 3 && state.gate.on && !state.gate.run.trim()) return "Enter the gate command, or untick the build gate.";
+  return "";
+}
+
+function render(error = "") {
+  const err = error ? `<div class="error" role="alert">${esc(error)}</div>` : "";
+  if (SETTINGS) {  // one page: team, checks, GitHub
+    $("steps").hidden = true;
+    $("panel").innerHTML = [2, 3, 1].map((i) => `<section class="panel">${views[i]()}</section>`).join("") + err;
+    $("back").textContent = "Back to the board";
+    $("next").textContent = "Save";
+    $("next").disabled = false;
+    return;
+  }
+  $("steps").innerHTML = STEPS.map((s, i) => `<li class="${i === step ? "on" : i < step ? "done" : ""}" ${i === step ? 'aria-current="step"' : ""}>${i + 1}. ${s}</li>`).join("");
+  $("panel").innerHTML = `<section class="panel">${views[step]()}${err}</section>`;
+  $("back").style.visibility = step ? "visible" : "hidden";
+  $("next").textContent = step === STEPS.length - 1 ? "Create project" : "Next";
+  $("next").disabled = false;
+}
+
+// inputs write straight into state; re-render only where the view depends on them
+document.addEventListener("input", (e) => {
+  const t = e.target;
+  if (t.id === "prefix") { t.value = t.value.toUpperCase(); state.prefix = t.value; }
+  if (t.id === "gh-url") state.github.url = t.value;
+  if (t.id === "gh-name") state.github.name = t.value;
+  if (t.id === "gate-run") state.gate.run = t.value;
+});
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.name === "gh") { state.github.mode = t.value; render(); }
+  if (t.id === "gh-vis") state.github.visibility = t.value;
+  if (t.dataset.stage) state.stages[t.dataset.stage] = t.value;
+  if (t.dataset.plugin) { state.plugins[t.dataset.plugin] = t.checked; render(); }
+  if (t.dataset.context !== undefined) {
+    const run = state.contextOptions[+t.dataset.context].run;
+    state.context = t.checked ? [...state.context, run] : state.context.filter((c) => c !== run);
+  }
+  if (t.id === "gate-on") { state.gate.on = t.checked; render(); }
+  if (t.id === "gate-mode") state.gate.mode = t.value;
+  if (t.id === "attempts") state.attempts = +t.value;
+});
+document.addEventListener("click", (e) => {
+  if (e.target.id !== "ctx-add") return;
+  const run = $("ctx-new").value.trim();
+  if (!run) return;
+  if (!state.contextOptions.some((o) => o.run === run)) state.contextOptions.push({ run, why: "added by you" });
+  if (!state.context.includes(run)) state.context.push(run);
+  render();
+});
+
+$("back").onclick = () => { if (SETTINGS) location.href = "/"; else { step--; render(); } };
+$("next").onclick = async () => {
+  const problem = SETTINGS ? [1, 3].map(check).find(Boolean) : check(step);
+  if (problem) return render(problem);
+  if (!SETTINGS && step < STEPS.length - 1) { step++; return render(); }
+  $("next").disabled = true; $("next").textContent = SETTINGS ? "Saving…" : "Setting up…";
+  const r = await fetch(SETTINGS ? "/api/settings" : "/api/setup", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildPayload()) });
+  const res = await r.json();
+  if (!r.ok) return render(res.error);
+  if (SETTINGS) {
+    const failed = res.steps.filter((s) => !s.ok);
+    if (!failed.length) { location.href = "/?saved=1"; return; }
+    return render(failed.map((s) => s.msg).join(" "));
+  }
+  const failed = res.steps.some((s) => !s.ok);
+  $("panel").innerHTML = `<section class="panel"><h2>${failed ? "Set up, with problems" : "Ready"}</h2>
+    <ul class="result">${res.steps.map((s) => `<li><span class="${s.ok ? "ok" : "bad"}">${s.ok ? "✓" : "✕"}</span> ${esc(s.msg)}</li>`).join("")}</ul>
+    <p class="hint">${failed ? "Fix the failed step by hand (or edit <code>.team/config.json</code>), then open the board." : "Next: create your first ticket on the board."}</p></section>`;
+  $("back").style.visibility = "hidden";
+  $("next").disabled = false; $("next").textContent = "Open the board";
+  $("next").onclick = () => location.reload();
+};
+
+load().catch(() => { $("panel").innerHTML = '<div class="error">Couldn\'t reach the sprintkit server. Is it still running?</div>'; });
+</script>
+</body>
+</html>

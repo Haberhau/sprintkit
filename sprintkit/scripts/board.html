@@ -27,6 +27,9 @@
   .status.offline { color: var(--fail); }
   button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line);
            background: var(--card); color: var(--text); padding: 6px 12px; }
+  a.btn { font: inherit; border-radius: 6px; border: 1px solid var(--line); background: var(--card);
+          color: var(--text); padding: 6px 12px; text-decoration: none; }
+  a.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   button:focus-visible, .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   main { display: flex; gap: 12px; padding: 16px; overflow-x: auto; align-items: flex-start; }
@@ -65,14 +68,35 @@
            color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0;
            transition: opacity .2s; pointer-events: none; max-width: calc(100vw - 32px); }
   #toast.show { opacity: 1; }
+  #queue { margin: 16px 16px 0; padding: 10px 12px; border: 2px dashed var(--line); border-radius: 10px;
+           display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 58px; }
+  #queue.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  #queue h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 4px 0 0; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--line);
+          border-radius: 16px; padding: 3px 4px 3px 10px; font-size: 12px; max-width: 280px; }
+  .chip > span { white-space: nowrap; }
+  .chip .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .chip button { border: 0; padding: 0 6px; background: transparent; color: var(--muted); }
+  #queue .run { margin-left: auto; font-size: 12px; padding: 4px 10px; }
+  .card[draggable="true"] { cursor: grab; }
+  .card.dragging { opacity: .5; }
+  .running { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .running { animation: none; } }
+  .queued-badge { font-size: 11px; font-weight: 600; color: var(--accent); }
+  .card-actions { display: flex; flex-direction: column; gap: 6px; }
+  .qbtn { font-size: 12px; padding: 4px 8px; text-align: left; color: var(--accent); }
 </style>
 </head>
 <body>
 <header>
   <h1 id="heading">sprintkit board</h1>
   <span class="status" id="status" role="status">connecting…</span>
+  <a class="btn" href="/settings">Settings</a>
   <button class="primary" id="new-btn">New ticket</button>
 </header>
+<section id="queue" aria-label="Sprint queue"></section>
 <main id="board" aria-label="Ticket board"></main>
 
 <dialog id="detail" aria-labelledby="detail-title"></dialog>
@@ -105,6 +129,7 @@
 const LABELS = { "in-progress": "In progress", "in-review": "In review", "in-qa": "In QA",
                  "release-candidate": "Release candidate" };
 const BUILT = new Set(["backlog", "refining", "refined", "in-progress", "in-review"]);
+const RUNNING = new Set(["refining", "in-progress"]);
 let lastStatus = null;   // id -> status from previous poll, null before first load
 let tickets = [];
 
@@ -124,18 +149,39 @@ async function copyNext(cmd) {
 
 function cardHTML(t, moved) {
   const reason = t.failed ? t.last.replace(/^\S+ /, "") : "";
-  return `<article class="card${moved ? " moved" : ""}" tabindex="0" data-id="${esc(t.id)}" aria-label="${esc(t.id)} ${esc(t.title)}">
-    <div class="row"><span class="id">${esc(t.id)}</span>
+  const queueable = t.next && !t.queued;
+  return `<article class="card${moved ? " moved" : ""}" tabindex="0" data-id="${esc(t.id)}"
+      ${queueable ? 'draggable="true"' : ""} aria-label="${esc(t.id)} ${esc(t.title)}">
+    <div class="row">${RUNNING.has(t.status) ? '<span class="running" title="being worked on"></span>' : ""}
+      <span class="id">${esc(t.id)}</span>
       <span class="type" style="color:var(--${esc(t.type)})">${esc(t.type)}</span>
+      ${t.queued ? `<span class="queued-badge">#${t.queued} in queue</span>` : ""}
       ${t.points ? `<span class="points" title="points">${esc(t.points)}</span>` : ""}</div>
     <div class="title">${esc(t.title)}</div>
     ${t.failed ? `<div class="fail">✕ ${esc(reason)}</div>` : ""}
-    ${t.next ? `<button class="next" data-cmd="${esc(t.next)}">▶ <code>${esc(t.next)}</code></button>` : ""}
+    ${t.next ? `<div class="card-actions">
+      <button class="next" data-cmd="${esc(t.next)}" title="Copy command">▶ <code>${esc(t.next)}</code></button>
+      ${queueable ? `<button class="qbtn" data-queue="${esc(t.id)}">+ Add to sprint queue</button>` : ""}</div>` : ""}
   </article>`;
+}
+
+function renderQueue(data) {
+  const byId = Object.fromEntries(data.tickets.map((t) => [t.id, t]));
+  const chips = data.queue.map((id, i) => {
+    const t = byId[id] || { title: "", next: "" };
+    const stage = t.next ? t.next.split(" ")[0].replace("/sprintkit:", "") : "";
+    return `<span class="chip"><span class="n">${i + 1}.</span><span class="id">${esc(id)}</span>
+      <span class="t">${esc(t.title)}</span>${stage ? `<span class="hint">· ${esc(stage)}</span>` : ""}
+      <button data-unqueue="${esc(id)}" aria-label="Remove ${esc(id)} from queue">✕</button></span>`;
+  }).join("");
+  $("queue").innerHTML = `<h2>Sprint queue</h2>${chips ||
+    '<span class="hint">Drag cards here, or use "+ Add to sprint queue", to plan the sprint.</span>'}
+    ${data.queue.length ? '<button class="next run" data-cmd="/sprintkit:sprint">▶ <code>/sprintkit:sprint</code> runs the queue</button>' : ""}`;
 }
 
 function render(data) {
   $("heading").textContent = `sprintkit · ${data.prefix}`;
+  renderQueue(data);
   const extra = [...new Set(data.tickets.map((t) => t.status))].filter((s) => !data.columns.includes(s));
   const cols = data.columns.concat(extra);
   $("board").innerHTML = cols.map((col) => {
@@ -200,7 +246,34 @@ async function poll() {
   }
 }
 
+async function queueAction(id, action) {
+  const r = await fetch("/api/queue", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, action }) });
+  if (!r.ok) toast((await r.json()).error);
+  poll();
+}
+
+document.addEventListener("dragstart", (e) => {
+  const card = e.target.closest?.(".card");
+  if (!card) return;
+  e.dataTransfer.setData("text/plain", card.dataset.id);
+  card.classList.add("dragging");
+});
+document.addEventListener("dragend", (e) => e.target.classList?.remove("dragging"));
+const q = $("queue");
+q.addEventListener("dragover", (e) => { e.preventDefault(); q.classList.add("over"); });
+q.addEventListener("dragleave", () => q.classList.remove("over"));
+q.addEventListener("drop", (e) => {
+  e.preventDefault(); q.classList.remove("over");
+  const id = e.dataTransfer.getData("text/plain");
+  if (id) queueAction(id, "add");
+});
+
 document.addEventListener("click", (e) => {
+  const add = e.target.closest("[data-queue]");
+  if (add) { e.stopPropagation(); return queueAction(add.dataset.queue, "add"); }
+  const remove = e.target.closest("[data-unqueue]");
+  if (remove) return queueAction(remove.dataset.unqueue, "remove");
   const next = e.target.closest(".next");
   if (next) { e.stopPropagation(); return copyNext(next.dataset.cmd); }
   const card = e.target.closest(".card");
@@ -208,7 +281,7 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   const card = e.target.closest?.(".card");
-  if (card && (e.key === "Enter" || e.key === " ") && !e.target.closest(".next")) { e.preventDefault(); openDetail(card.dataset.id); }
+  if (card && (e.key === "Enter" || e.key === " ") && !e.target.closest("button")) { e.preventDefault(); openDetail(card.dataset.id); }
 });
 
 $("new-btn").onclick = () => { $("create-error").textContent = ""; $("create").showModal(); $("f-title").focus(); };
@@ -225,6 +298,7 @@ $("create-form").onsubmit = async (e) => {
   poll();
 };
 
+if (new URLSearchParams(location.search).has("saved")) { toast("Settings saved"); history.replaceState(null, "", "/"); }
 poll();
 setInterval(poll, 2000);
 </script>

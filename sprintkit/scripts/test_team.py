@@ -48,6 +48,7 @@ def check_server():
 
         code, page = req("/")
         assert code == 200 and b"sprintkit board" in page
+        assert req("/?saved=1")[0] == 200  # query strings don't break routing
         code, body = req("/api/tickets")
         data = json.loads(body)
         by_id = {t["id"]: t for t in data["tickets"]}
@@ -65,8 +66,168 @@ def check_server():
         assert req("/api/tickets", b"type=story&title=x", "application/x-www-form-urlencoded")[0] == 400
         assert req("/api/tickets", host="evil.example:80")[0] == 403
         assert req("/api/tickets", json.dumps({"type": "nope", "title": "x"}).encode())[0] == 400
+
+        # queue from the board
+        code, body = req("/api/queue", json.dumps({"id": "APP-4", "action": "add"}).encode())
+        assert code == 200 and json.loads(body)["queue"] == ["APP-4"]
+        tickets = {t["id"]: t for t in json.loads(req("/api/tickets")[1])["tickets"]}
+        assert tickets["APP-4"]["queued"] == 1 and tickets["APP-1"]["queued"] == 0
+        assert req("/api/queue", json.dumps({"id": "APP-99"}).encode())[0] == 404
+        assert req("/api/queue", json.dumps({"id": "../../x"}).encode())[0] == 400
+        code, body = req("/api/queue", json.dumps({"id": "APP-4", "action": "remove"}).encode())
+        assert json.loads(body)["queue"] == []
     finally:
         srv.terminate()
+
+
+def check_autopilot():
+    import os
+    with tempfile.TemporaryDirectory() as d:
+        os.chdir(d)
+        sh("git init -q -b main && git config user.email t@t && git config user.name t "
+           "&& git commit -q --allow-empty -m init")
+        run("init", "--prefix", "APP")
+        run("new", "story", "Needs refining")
+        run("new", "bug", "Quick fix")
+        run("queue", "add", "APP-1")
+        assert run("queue", "add", "APP-2").strip() == "APP-1 APP-2"
+
+        # refine fails twice → blocked and dequeued, autopilot moves on
+        for _ in range(2):
+            assert run("next").strip() == "NEXT: refine APP-1"
+            run("start", "refine", "APP-1")
+            run("finish", "refine", "APP-1", ok=False)
+        out = run("next")
+        assert "BLOCKED: APP-1" in out and out.strip().endswith("NEXT: build APP-2")
+        assert "blocked: true" in next(Path(".team/tickets").glob("APP-1-*")).read_text()
+        assert run("queue").strip() == "APP-2"
+
+        # bug builds and passes → dequeued, queue done
+        run("start", "build", "APP-2")
+        bug = next(Path(".team/tickets").glob("APP-2-*"))
+        fill(bug, "Implementation notes", "Fixed.")
+        sh("git commit -q --allow-empty -m 'APP-2 fix'")
+        run("finish", "build", "APP-2")
+        out = run("next")
+        assert "DEQUEUED: APP-2" in out and out.strip().endswith("NEXT: none")
+
+        # next ticket's branch starts from main, not from APP-2's unreviewed branch
+        run("new", "chore", "Other work")
+        run("start", "build", "APP-3")
+        assert subprocess.check_output(["git", "log", "--oneline", "main..HEAD"], text=True) == ""
+
+        # re-queueing unblocks and resets the attempt counter; human executors get blocked
+        run("queue", "add", "APP-1")
+        assert "blocked: false" in next(Path(".team/tickets").glob("APP-1-*")).read_text()
+        assert run("next").strip() == "NEXT: refine APP-1"
+        cfg = json.loads(Path(".team/config.json").read_text())
+        cfg["stages"]["refine"] = {"human": True}
+        Path(".team/config.json").write_text(json.dumps(cfg))
+        assert "BLOCKED: APP-1 (refine is set to a human executor)" in run("next")
+
+
+def check_setup():
+    import os
+    import urllib.request
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as proj:
+        # fake ~/.claude with one installed plugin that has an agent and a skill
+        plug = Path(home, "cache/acme")
+        (plug / "agents").mkdir(parents=True)
+        (plug / "agents/fixer.md").write_text("---\nname: fixer\ndescription: Fixes things\n---\n")
+        (plug / "skills/tdd").mkdir(parents=True)
+        (plug / "skills/tdd/SKILL.md").write_text("---\nname: tdd\ndescription: |\n  multi\n---\n")
+        Path(home, ".claude/plugins").mkdir(parents=True)
+        Path(home, ".claude/plugins/installed_plugins.json").write_text(json.dumps(
+            {"version": 2, "plugins": {"acme@market": [{"installPath": str(plug)}]}}))
+        Path(home, ".claude/settings.json").write_text(json.dumps({"enabledPlugins": {"acme@market": True}}))
+        Path(proj, "package.json").write_text(json.dumps({"scripts": {"test": "jest"}}))
+        Path(proj, ".claude").mkdir()
+        Path(proj, ".claude/settings.json").write_text(json.dumps({"permissions": {"allow": ["Bash(ls)"]}}))
+
+        env = {**os.environ, "HOME": home, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        srv = subprocess.Popen([sys.executable, str(TEAM), "serve", "--port", "0"], cwd=proj, env=env,
+                               stdout=subprocess.PIPE, text=True)
+        try:
+            base = srv.stdout.readline().split()[-1]
+
+            def post(data):
+                r = urllib.request.Request(base + "/api/setup", data=json.dumps(data).encode(),
+                                           headers={"Content-Type": "application/json"})
+                try:
+                    with urllib.request.urlopen(r) as resp:
+                        return resp.status, json.loads(resp.read())
+                except urllib.error.HTTPError as e:
+                    return e.code, json.loads(e.read())
+
+            assert b"Set up sprintkit" in urllib.request.urlopen(base + "/").read()
+            info = json.loads(urllib.request.urlopen(base + "/api/setup").read())
+            acme = info["plugins"][0]
+            assert acme["id"] == "acme@market" and acme["enabled"]
+            assert acme["agents"][0]["id"] == "acme:fixer" and acme["skills"][0] == {"id": "acme:tdd", "description": ""}
+            assert {"run": "npm test", "why": "package.json test script"} in info["checks"]
+            assert not info["git"]["isRepo"] and info["prefix"] == Path(proj).name[:4].upper()
+
+            # validation happens before anything is touched
+            assert post({"prefix": "bad prefix"})[0] == 400
+            assert post({"prefix": "AB", "github": {"mode": "create", "name": "x; rm -rf ~", "visibility": "private"}})[0] == 400
+            assert post({"prefix": "AB", "stages": {"build": {"agent": "a b"}}})[0] == 400
+            assert not Path(proj, ".git").exists()
+
+            code, res = post({"prefix": "AB", "stages": {"refine": {"human": True}, "build": {"agent": "acme:fixer"}},
+                              "context": [], "gates": {"build": {"run": "npm test", "mode": "block"}},
+                              "plugins": {"acme@market": False},
+                              "github": {"mode": "link", "url": "https://github.com/me/proj"}})
+            assert code == 200 and all(s["ok"] for s in res["steps"]), res
+            cfg = json.loads(Path(proj, ".team/config.json").read_text())
+            assert cfg["stages"]["build"] == {"agent": "acme:fixer"} and cfg["gates"]["build"]["mode"] == "block"
+            settings = json.loads(Path(proj, ".claude/settings.json").read_text())
+            assert settings == {"permissions": {"allow": ["Bash(ls)"]}, "enabledPlugins": {"acme@market": False}}
+            git = lambda *a: subprocess.check_output(["git", *a], cwd=proj, text=True).strip()
+            assert git("remote", "get-url", "origin") == "https://github.com/me/proj"
+            assert git("log", "--oneline").endswith("Initial commit")
+
+            # after setup: the board is served, and setup can't run twice
+            assert b"sprintkit board" in urllib.request.urlopen(base + "/").read()
+            assert post({"prefix": "AB"})[0] == 409
+
+            # settings: edits what the screen shows, keeps hand-written config
+            assert b"Set up sprintkit" in urllib.request.urlopen(base + "/settings").read()  # same page, settings mode
+            cfg_path = Path(proj, ".team/config.json")
+            cfg = json.loads(cfg_path.read_text())
+            cfg.update({"flows": {"bug": ["build"]}, "context_max_chars": 900,
+                        "gates": {**cfg["gates"], "qa": {"run": "make e2e", "mode": "block"}},
+                        "stages": {**cfg["stages"], "qa": {"command": "./qa.sh"}}})
+            cfg_path.write_text(json.dumps(cfg))
+            assert json.loads(urllib.request.urlopen(base + "/api/setup").read())["config"]["flows"] == {"bug": ["build"]}
+
+            def save(data):
+                r = urllib.request.Request(base + "/api/settings", data=json.dumps(data).encode(),
+                                           headers={"Content-Type": "application/json"})
+                try:
+                    with urllib.request.urlopen(r) as resp:
+                        return resp.status, json.loads(resp.read())
+                except urllib.error.HTTPError as e:
+                    return e.code, json.loads(e.read())
+
+            code, res = save({"stages": {"refine": {"agent": "acme:fixer", "skills": ["acme:tdd"]},
+                                         "build": {"human": True}, "qa": {"command": "./qa.sh"}},
+                              "context": ['rg -l "$TICKET_TITLE"'], "gates": {},
+                              "plugins": {"acme@market": True}, "autopilot": {"max_attempts": 3},
+                              "github": {"mode": "keep"}})
+            assert code == 200 and all(s["ok"] for s in res["steps"]), res
+            cfg = json.loads(cfg_path.read_text())
+            assert cfg["prefix"] == "AB" and cfg["flows"] == {"bug": ["build"]} and cfg["context_max_chars"] == 900
+            assert cfg["gates"] == {"qa": {"run": "make e2e", "mode": "block"}}  # build gate off, qa kept
+            assert cfg["stages"]["qa"] == {"command": "./qa.sh"} and cfg["stages"]["build"] == {"human": True}
+            assert cfg["stages"]["refine"] == {"agent": "acme:fixer", "skills": ["acme:tdd"]}
+            assert cfg["autopilot"]["max_attempts"] == 3 and cfg["context"] == ['rg -l "$TICKET_TITLE"']
+            assert json.loads(Path(proj, ".claude/settings.json").read_text())["enabledPlugins"] == {"acme@market": True}
+            assert save({"stages": {"build": {"agent": "x; rm"}}})[0] == 400
+            assert save({"autopilot": {"max_attempts": 99}})[0] == 400
+            assert json.loads(cfg_path.read_text())["autopilot"]["max_attempts"] == 3  # rejected saves change nothing
+        finally:
+            srv.terminate()
 
 
 def main():
@@ -144,6 +305,8 @@ def main():
         board = run("board")
         assert "IN-REVIEW (2)" in board and "IN-PROGRESS (1)" in board
         check_server()
+    check_autopilot()
+    check_setup()
     print("all checks passed")
 
 
