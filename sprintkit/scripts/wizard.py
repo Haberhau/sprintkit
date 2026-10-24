@@ -141,7 +141,7 @@ def discover(cwd):
         "project": {"agents": proj_agents, "skills": proj_skills},
         "checks": detect_checks(cwd), "context": context,
         "defaults": {"refine": {"agent": "sprintkit:tech-lead"}, "build": {"agent": "sprintkit:developer"},
-                     "review": {"agent": "sprintkit:reviewer"}},
+                     "review": {"agent": "sprintkit:reviewer"}, "qa": {"agent": "sprintkit:qa-engineer"}},
     }
 
 

@@ -7,7 +7,7 @@ sprintkit owns the **process**. You choose **who** does each stage: the shipped 
 backlog ─refine─▶ refined ─build─▶ in-review ─review─▶ in-qa ─qa─▶ done ─sanity─▶ ─deploy─▶ released
 ```
 
-MVP status: `refine`, `build`, `review`, the live board and the sprint autopilot work end to end. `qa`, `sanity`, `deploy` and `retro` are specified in [docs/stage-contract.md](../docs/stage-contract.md) and not built yet.
+MVP status: `refine`, `build`, `review`, `qa` (merges into the base branch on pass), the live board and the sprint autopilot work end to end. `sanity`, `deploy` and `retro` are specified in [docs/stage-contract.md](../docs/stage-contract.md) and not built yet.
 
 ## Try it
 
@@ -21,6 +21,7 @@ Then, in your project:
 /sprintkit:refine APP-1
 /sprintkit:build APP-1
 /sprintkit:review APP-1
+/sprintkit:qa APP-1
 /sprintkit:board
 ```
 
@@ -55,9 +56,10 @@ Drag cards into the **Sprint queue** lane (or click "+ Add to sprint queue"), th
 It works through the queue in order, running each ticket's next stage with the configured executors, without asking in between.
 Watch the cards move on the board.
 
-- A ticket leaves the queue once the autopilot can't take it further (for now: once it reaches QA, or `done` for spikes and chores).
+- A ticket leaves the queue once the autopilot can't take it further (for now: once it's `done`).
 - A ticket that fails the same stage's gate twice is marked **blocked** and skipped (`"autopilot": {"max_attempts": 2}`). Re-queueing it means "try again".
 - A ticket the reviewer sends back goes to build again with the review notes. Review rejections count as failures, so a ticket that keeps bouncing gets blocked too.
+- A ticket that passes QA but conflicts with the base branch is blocked; nothing is merged.
 - Stages set to `{"human": true}` are blocked, not guessed at.
 - Every build branch starts from the base branch, so tickets never stack on each other's unreviewed work.
 
@@ -83,7 +85,7 @@ Context commands and gates get ticket data as env vars only (`TICKET_ID`, `TICKE
 
 ## What costs tokens
 
-Only the thinking work: refining, building and reviewing. Ticket bookkeeping, the board, branches and gates run in `scripts/team.py`, which uses only the Python standard library and costs zero tokens.
+Only the thinking work: refining, building, reviewing and QA. Ticket bookkeeping, the board, branches and gates run in `scripts/team.py`, which uses only the Python standard library and costs zero tokens.
 
 ## Development
 

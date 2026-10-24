@@ -86,7 +86,7 @@ const STAGES = [
   ["refine", "Turns a backlog ticket into acceptance criteria, technical notes and an estimate."],
   ["build", "Implements a refined ticket on its own branch and commits it."],
   ["review", "Reviews the branch against the acceptance criteria."],
-  ["qa", "Tests every acceptance criterion and files bugs.", true],
+  ["qa", "Tests every acceptance criterion and files bugs."],
 ];
 const SETTINGS = location.pathname === "/settings";  // same page edits an existing setup
 let info, step = 0;

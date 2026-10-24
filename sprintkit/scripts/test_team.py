@@ -114,8 +114,8 @@ def check_autopilot():
         fill(bug, "Implementation notes", "Fixed.")
         sh("git commit -q --allow-empty -m 'APP-2 fix'")
         run("finish", "build", "APP-2")
-        out = run("next")
-        assert "DEQUEUED: APP-2" in out and out.strip().endswith("NEXT: none")
+        assert run("next").strip() == "NEXT: qa APP-2"
+        run("queue", "remove", "APP-2")
 
         # next ticket's branch starts from main, not from APP-2's unreviewed branch
         run("new", "chore", "Other work")
@@ -185,8 +185,8 @@ def check_review():
         run("start", "review", "APP-1")
         review(story, "**VERDICT: approve**")
         out = run("finish", "review", "APP-1")
-        assert "PASS: APP-1 → in-qa" in out and "NEXT:" not in out  # qa isn't built yet
-        assert "DEQUEUED: APP-1" in run("next")
+        assert "PASS: APP-1 → in-qa" in out and "NEXT: /sprintkit:qa APP-1" in out
+        assert run("next").strip() == "NEXT: qa APP-1"
 
         # spikes and chores end at done (flow: refine → build, build)
         sh("git checkout -q main")
@@ -209,10 +209,75 @@ def check_review():
         assert "PASS: APP-3 → done" in run("finish", "build", "APP-3")
 
 
+def check_qa():
+    import os
+    with tempfile.TemporaryDirectory() as d:
+        os.chdir(d)
+        sh("git init -q -b main && git config user.email t@t && git config user.name t "
+           "&& git commit -q --allow-empty -m init")
+        run("init", "--prefix", "APP")
+        git = lambda *a: subprocess.check_output(["git", *a], text=True).strip()
+
+        def built_bug(title, n, file):
+            sh("git checkout -q main")
+            bug = Path(run("new", "bug", title).strip())
+            run("start", "build", f"APP-{n}")
+            fill(bug, "Implementation notes", "Fixed.")
+            Path(file).write_text(f"fix {n}")
+            sh(f"git add {file} && git commit -q -m 'APP-{n} fix'")
+            assert f"NEXT: /sprintkit:qa APP-{n}" in run("finish", "build", f"APP-{n}")
+            return bug
+
+        # bug flow: build → qa. No AC ticked → back to refined, the next build sees the QA notes
+        bug = built_bug("Crash on save", 1, "save.txt")
+        sh("git checkout -q main")
+        run("start", "qa", "APP-1")
+        assert status(bug) == "testing" and git("branch", "--show-current") == "APP-1-crash-on-save"
+        fill(bug, "QA notes", "Still crashes on empty file.")
+        fill(bug, "Acceptance criteria", "- [x] saving no longer crashes\n- [ ] empty file saves")
+        assert "every Acceptance criteria box" in run("finish", "qa", "APP-1", ok=False)
+        assert status(bug) == "refined"
+        assert "Bounce-back: address these QA notes" in run("start", "build", "APP-1")
+        sh("git commit -q --allow-empty -m 'APP-1 handle empty file'")
+        run("finish", "build", "APP-1")
+
+        # uncommitted tests fail the gate; nothing is merged
+        run("start", "qa", "APP-1")
+        bug.write_text(bug.read_text().replace("- [ ] empty", "- [x] empty"))
+        Path("test_save.txt").write_text("test")
+        assert "uncommitted" in run("finish", "qa", "APP-1", ok=False)
+        assert git("ls-tree", "main", "save.txt") == ""
+
+        # pass → merged into main with --no-ff, ticket done, on main afterwards
+        run("start", "build", "APP-1")
+        sh("git add test_save.txt && git commit -q -m 'APP-1 test'")
+        run("finish", "build", "APP-1")
+        run("start", "qa", "APP-1")
+        assert "PASS: APP-1 → done" in run("finish", "qa", "APP-1")
+        assert git("branch", "--show-current") == "main" and Path("save.txt").read_text() == "fix 1"
+        assert git("log", "-1", "--format=%s") == "APP-1 Merge APP-1-crash-on-save"
+        assert len(git("log", "-1", "--format=%P").split()) == 2  # a merge commit, not a fast-forward
+
+        # conflict with main → merge aborted, ticket blocked in in-qa, main untouched
+        bug2 = built_bug("Wrong total", 2, "total.txt")
+        sh("git checkout -q main && echo other > total.txt && git add total.txt && git commit -q -m 'other change'")
+        run("queue", "add", "APP-2")
+        run("start", "qa", "APP-2")
+        fill(bug2, "Acceptance criteria", "- [x] total is right")
+        fill(bug2, "QA notes", "Checked.")
+        out = run("finish", "qa", "APP-2", ok=False)
+        assert "BLOCKED: APP-2" in out and "total.txt" in out
+        assert status(bug2) == "in-qa" and "blocked: true" in bug2.read_text()
+        assert git("branch", "--show-current") == "APP-2-wrong-total" and not git("status", "--porcelain", "--", ".", ":!.team")
+        assert git("show", "main:total.txt") == "other" and run("queue").strip() == "queue is empty"
+
+
 def check_setup():
     import os
     import urllib.request
-    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as proj:
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as tmp:
+        proj = str(Path(tmp, "shopapp"))  # fixed name: random temp names like tmpa_b4 change the prefix
+        os.mkdir(proj)
         # fake ~/.claude with one installed plugin that has an agent and a skill
         plug = Path(home, "cache/acme")
         (plug / "agents").mkdir(parents=True)
@@ -249,7 +314,7 @@ def check_setup():
             assert acme["id"] == "acme@market" and acme["enabled"]
             assert acme["agents"][0]["id"] == "acme:fixer" and acme["skills"][0] == {"id": "acme:tdd", "description": ""}
             assert {"run": "npm test", "why": "package.json test script"} in info["checks"]
-            assert not info["git"]["isRepo"] and info["prefix"] == Path(proj).name[:4].upper()
+            assert not info["git"]["isRepo"] and info["prefix"] == "SHOP"
 
             # validation happens before anything is touched
             assert post({"prefix": "bad prefix"})[0] == 400
@@ -394,6 +459,7 @@ def main():
         assert board.index("APP-9 ") < board.index("APP-10 ")  # ID order, not alphabetical
     check_autopilot()
     check_review()
+    check_qa()
     check_setup()
     print("all checks passed")
 

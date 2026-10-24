@@ -28,6 +28,7 @@ STAGES = {
     "refine": ("refining", "backlog"),
     "build": ("in-progress", "in-progress"),
     "review": ("reviewing", "refined"),
+    "qa": ("testing", "refined"),
 }
 # status a ticket waits in before each stage, when it isn't the first stage of its flow
 WAITS = {"refine": "backlog", "build": "refined", "review": "in-review", "qa": "in-qa"}
@@ -44,6 +45,7 @@ DEFAULT_CONFIG = {
         "refine": {"agent": "sprintkit:tech-lead"},
         "build": {"agent": "sprintkit:developer"},
         "review": {"agent": "sprintkit:reviewer"},
+        "qa": {"agent": "sprintkit:qa-engineer"},
     },
     "context": [],
     "context_by_stage": {},
@@ -54,7 +56,7 @@ DEFAULT_CONFIG = {
     "autopilot": {"max_attempts": 2},
 }
 BOARD_COLUMNS = ["backlog", "refining", "refined", "in-progress", "in-review", "reviewing",
-                 "in-qa", "done", "release-candidate", "released"]
+                 "in-qa", "testing", "done", "release-candidate", "released"]
 
 TEMPLATE = """---
 id: {id}
@@ -264,10 +266,10 @@ def cmd_start(args):
         exists = sh(f"git rev-parse --verify --quiet refs/heads/{branch}").returncode == 0
         git("checkout", branch) if exists else git("checkout", "-b", branch, cfg["base_branch"])
         meta["branch"] = branch
-    if stage == "review":
+    if stage in ("review", "qa"):
         if not meta.get("branch"):
-            die(f"{tid} has no branch to review")
-        git("checkout", meta["branch"])  # so the reviewer reads and runs the code under review
+            die(f"{tid} has no branch to {stage}")
+        git("checkout", meta["branch"])  # so the executor reads and runs the code under test
 
     resumed = meta["status"] == running
     if not resumed:
@@ -321,7 +323,29 @@ def builtin_gate(cfg, stage, meta, body):
             problems.append("Review notes must end with 'VERDICT: approve' or 'VERDICT: changes'")
         elif v == "changes":
             problems.append("reviewer asked for changes, see Review notes")
+    if stage == "qa":
+        boxes = re.findall(r"^- \[([ xX])\] \S", section(body, "Acceptance criteria"), re.M)
+        if not boxes or " " in boxes:
+            problems.append("every Acceptance criteria box must be ticked '- [x]'")
+        if not section(body, "QA notes"):
+            problems.append("QA notes is empty")
+        if sh("git status --porcelain -- . ':!.team'").stdout.strip():
+            problems.append("uncommitted changes outside .team/")
     return problems
+
+
+def merge(cfg, meta):
+    """Merge the ticket branch into the base branch. Returns the conflicting files, or [] on success."""
+    branch = meta["branch"]
+    git("checkout", cfg["base_branch"])
+    r = subprocess.run(["git", "merge", "--no-ff", "-m", f"{meta['id']} Merge {branch}", branch],
+                       capture_output=True, text=True)
+    if not r.returncode:
+        return []
+    files = sh("git diff --name-only --diff-filter=U").stdout.split() or [r.stderr.strip()[:200]]
+    sh("git merge --abort")
+    git("checkout", branch)
+    return files
 
 
 def verdict(body):
@@ -367,6 +391,14 @@ def cmd_finish(args):
         print(f"FAIL: {tid} → {failed}")
         for p in problems:
             print(f"  - {p}")
+        sys.exit(1)
+    if stage == "qa" and (conflicts := merge(cfg, meta)):
+        # a rerun of qa can't fix this, so block instead of failing the gate
+        meta["status"] = WAITS["qa"]
+        block(path, meta, body, f"merge into {cfg['base_branch']} conflicts: {', '.join(conflicts)}")
+        queue_remove(tid)
+        print(f"BLOCKED: {tid} passed QA but conflicts with {cfg['base_branch']} in: {', '.join(conflicts)}\n"
+              f"Merge {cfg['base_branch']} into {meta['branch']}, then re-queue it or run qa again.")
         sys.exit(1)
     passed = passed_status(cfg, meta, stage)
     body = log(meta, body, f"{running} → {passed}")

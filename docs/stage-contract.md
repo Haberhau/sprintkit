@@ -69,7 +69,7 @@ branch: PROJ-12-login-form # set by build
 
 Every stage advances a ticket to the status the next stage of its flow (§5) waits in, or to `done` after the flow's last stage.
 
-**Ownership rule:** each section is written by exactly one stage. Executors may
+**Ownership rule:** each section is written by exactly one stage (exception: QA ticks AC boxes, and writes a bug's AC if it has none). Executors may
 read everything, but write only their own section (plus code for `build`, tests for `qa`).
 Executors never touch `status` or `## Log` — that's the runner's job.
 
@@ -133,10 +133,11 @@ Every stage follows the same run sequence:
 | | |
 |---|---|
 | **Precondition** | `status: in-qa` |
-| **Output** | Tests covering each AC item, AC boxes ticked, `## QA notes`; out-of-scope bugs filed as new `bug` tickets |
+| **Runner prep** | checks out `branch`; status `testing` while it runs |
+| **Output** | Tests covering each AC item (committed on the branch), AC boxes ticked, `## QA notes`; out-of-scope bugs filed as new `bug` tickets. A `bug` has no refine, so QA writes its AC first if there are none |
 | **Default executor** | `qa-engineer` agent |
-| **Built-in gate** | all AC boxes ticked; user gate (e.g. `npm test`) |
-| **Pass →** | runner merges `branch` into main → `done` |
+| **Built-in gate** | ≥1 AC item and all ticked; QA notes non-empty; working tree clean; user gate (e.g. `npm test`) |
+| **Pass →** | runner merges `branch` into main (`--no-ff`) → `done`. On a merge conflict the merge is aborted and the ticket stays `in-qa`, blocked |
 | **Fail →** | back to `refined` with QA notes |
 
 ### `sanity` (release-level)
