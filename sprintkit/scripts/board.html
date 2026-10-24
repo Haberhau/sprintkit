@@ -128,8 +128,8 @@
 <script>
 const LABELS = { "in-progress": "In progress", "in-review": "In review", "in-qa": "In QA",
                  "release-candidate": "Release candidate" };
-const BUILT = new Set(["backlog", "refining", "refined", "in-progress", "in-review"]);
-const RUNNING = new Set(["refining", "in-progress"]);
+const BUILT = new Set(["backlog", "refining", "refined", "in-progress", "in-review", "reviewing", "in-qa", "done"]);
+const RUNNING = new Set(["refining", "in-progress", "reviewing"]);
 let lastStatus = null;   // id -> status from previous poll, null before first load
 let tickets = [];
 

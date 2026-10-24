@@ -28,6 +28,12 @@ def fill(path, name, text):
     path.write_text(s.replace(f"## {name}\n", f"## {name}\n{text}\n", 1))
 
 
+def review(path, text):
+    """Replace Review notes, as the reviewer does."""
+    s = path.read_text()
+    path.write_text(re.sub(r"(## Review notes\n).*?(?=## QA notes)", lambda m: f"{m.group(1)}{text}\n\n", s, flags=re.S))
+
+
 def check_server():
     import urllib.error
     import urllib.request
@@ -52,7 +58,7 @@ def check_server():
         code, body = req("/api/tickets")
         data = json.loads(body)
         by_id = {t["id"]: t for t in data["tickets"]}
-        assert by_id["APP-1"]["status"] == "in-review" and by_id["APP-1"]["next"] == ""
+        assert by_id["APP-1"]["status"] == "in-review" and by_id["APP-1"]["next"] == "/sprintkit:review APP-1"
         assert by_id["APP-2"]["failed"]  # its last log line is the blocked build gate
         assert not by_id["APP-3"]["failed"] and by_id["APP-3"]["next"] == "/sprintkit:build APP-3"
 
@@ -124,6 +130,83 @@ def check_autopilot():
         cfg["stages"]["refine"] = {"human": True}
         Path(".team/config.json").write_text(json.dumps(cfg))
         assert "BLOCKED: APP-1 (refine is set to a human executor)" in run("next")
+
+
+def check_review():
+    import os
+    with tempfile.TemporaryDirectory() as d:
+        os.chdir(d)
+        sh("git init -q -b main && git config user.email t@t && git config user.name t "
+           "&& git commit -q --allow-empty -m init")
+        run("init", "--prefix", "APP")
+        story = Path(run("new", "story", "Login form").strip())
+        run("start", "refine", "APP-1")
+        fill(story, "Acceptance criteria", "- [ ] user can log in")
+        fill(story, "Technical notes", "Session middleware.")
+        story.write_text(story.read_text().replace("blocked: false", "blocked: false\npoints: 2"))
+        assert "NEXT: /sprintkit:build APP-1" in run("finish", "refine", "APP-1")
+        run("start", "build", "APP-1")
+        fill(story, "Implementation notes", "Added form.")
+        Path("login.txt").write_text("form")
+        sh("git add login.txt && git commit -q -m 'APP-1 login form'")
+        assert "NEXT: /sprintkit:review APP-1" in run("finish", "build", "APP-1")
+        run("queue", "add", "APP-1")
+        assert run("next").strip() == "NEXT: review APP-1"
+
+        # review checks out the branch and shows the diff; no verdict → rerun review, not rebuild
+        sh("git checkout -q main")
+        out = run("start", "review", "APP-1")
+        assert "login.txt" in out and "BASE: main" in out
+        assert subprocess.check_output(["git", "branch", "--show-current"], text=True).strip() == "APP-1-login-form"
+        assert status(story) == "reviewing"
+        review(story, "Looks fine.")
+        assert "VERDICT" in run("finish", "review", "APP-1", ok=False)
+        assert status(story) == "in-review"
+
+        # changes → back to refined; the next build sees the review notes
+        run("start", "review", "APP-1")
+        review(story, "1. No test.\nVERDICT: changes")
+        assert "asked for changes" in run("finish", "review", "APP-1", ok=False)
+        assert status(story) == "refined"
+        assert "Bounce-back: address these Review notes" in run("start", "build", "APP-1")
+        sh("git commit -q --allow-empty -m 'APP-1 add test'")
+        run("finish", "build", "APP-1")
+
+        # rejected twice → the autopilot blocks it instead of ping-ponging build and review
+        run("start", "review", "APP-1")
+        review(story, "VERDICT: changes")
+        run("finish", "review", "APP-1", ok=False)
+        assert "BLOCKED: APP-1 (review gate failed 3x" in run("next")  # incl. the missing verdict
+
+        # approve → in-qa, last verdict line wins
+        run("queue", "add", "APP-1")
+        run("start", "build", "APP-1")
+        run("finish", "build", "APP-1")
+        run("start", "review", "APP-1")
+        review(story, "**VERDICT: approve**")
+        out = run("finish", "review", "APP-1")
+        assert "PASS: APP-1 → in-qa" in out and "NEXT:" not in out  # qa isn't built yet
+        assert "DEQUEUED: APP-1" in run("next")
+
+        # spikes and chores end at done (flow: refine → build, build)
+        sh("git checkout -q main")
+        spike = Path(run("new", "spike", "Pick a DB").strip())
+        run("start", "refine", "APP-2")
+        fill(spike, "Acceptance criteria", "- [ ] a recommendation is written down")
+        fill(spike, "Technical notes", "Timebox 1 day.")
+        spike.write_text(spike.read_text().replace("blocked: false", "blocked: false\npoints: 1"))
+        run("finish", "refine", "APP-2")
+        run("start", "build", "APP-2")
+        fill(spike, "Implementation notes", "Use SQLite.")
+        sh("git commit -q --allow-empty -m 'APP-2 decision record'")
+        assert "PASS: APP-2 → done" in run("finish", "build", "APP-2")
+        run("start", "review", "APP-2", ok=False)
+        sh("git checkout -q main")
+        chore = Path(run("new", "chore", "Bump deps").strip())
+        run("start", "build", "APP-3")
+        fill(chore, "Implementation notes", "Bumped.")
+        sh("git commit -q --allow-empty -m 'APP-3 bump'")
+        assert "PASS: APP-3 → done" in run("finish", "build", "APP-3")
 
 
 def check_setup():
@@ -310,6 +393,7 @@ def main():
         board = run("board")
         assert board.index("APP-9 ") < board.index("APP-10 ")  # ID order, not alphabetical
     check_autopilot()
+    check_review()
     check_setup()
     print("all checks passed")
 

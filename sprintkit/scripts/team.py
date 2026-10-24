@@ -23,11 +23,14 @@ TICKETS = TEAM / "tickets"
 CONFIG = TEAM / "config.json"
 QUEUE = TEAM / "queue.json"
 
-# stage -> (status while running, status on pass, status on fail)
+# stage -> (status while running, status on fail). The pass status comes from the flow.
 STAGES = {
-    "refine": ("refining", "refined", "backlog"),
-    "build": ("in-progress", "in-review", "in-progress"),
+    "refine": ("refining", "backlog"),
+    "build": ("in-progress", "in-progress"),
+    "review": ("reviewing", "refined"),
 }
+# status a ticket waits in before each stage, when it isn't the first stage of its flow
+WAITS = {"refine": "backlog", "build": "refined", "review": "in-review", "qa": "in-qa"}
 DEFAULT_FLOWS = {
     "story": ["refine", "build", "review", "qa"],
     "bug": ["build", "qa"],
@@ -40,6 +43,7 @@ DEFAULT_CONFIG = {
     "stages": {
         "refine": {"agent": "sprintkit:tech-lead"},
         "build": {"agent": "sprintkit:developer"},
+        "review": {"agent": "sprintkit:reviewer"},
     },
     "context": [],
     "context_by_stage": {},
@@ -49,7 +53,7 @@ DEFAULT_CONFIG = {
     "flows": DEFAULT_FLOWS,
     "autopilot": {"max_attempts": 2},
 }
-BOARD_COLUMNS = ["backlog", "refining", "refined", "in-progress", "in-review",
+BOARD_COLUMNS = ["backlog", "refining", "refined", "in-progress", "in-review", "reviewing",
                  "in-qa", "done", "release-candidate", "released"]
 
 TEMPLATE = """---
@@ -214,8 +218,14 @@ def prerequisite(cfg, meta, stage):
     flow = cfg["flows"][meta["type"]]
     if stage not in flow:
         die(f"{meta['type']} tickets don't go through {stage} (flow: {' → '.join(flow)})")
+    return "backlog" if flow[0] == stage else WAITS[stage]
+
+
+def passed_status(cfg, meta, stage):
+    """Where a ticket goes on pass: waiting for the next stage of its flow, or done."""
+    flow = cfg["flows"][meta["type"]]
     i = flow.index(stage)
-    return "backlog" if i == 0 else STAGES[flow[i - 1]][1]
+    return WAITS[flow[i + 1]] if i + 1 < len(flow) else "done"
 
 
 def allowed_statuses(cfg, meta, stage):
@@ -240,7 +250,7 @@ def cmd_start(args):
     cfg = load_config()
     path = find(tid)
     meta, body = parse(path)
-    running, _, _ = STAGES[stage]
+    running, _ = STAGES[stage]
     allowed = allowed_statuses(cfg, meta, stage)
     if meta["status"] not in allowed:
         die(f"{tid} is '{meta['status']}', {stage} needs one of: {', '.join(sorted(allowed))}")
@@ -254,6 +264,10 @@ def cmd_start(args):
         exists = sh(f"git rev-parse --verify --quiet refs/heads/{branch}").returncode == 0
         git("checkout", branch) if exists else git("checkout", "-b", branch, cfg["base_branch"])
         meta["branch"] = branch
+    if stage == "review":
+        if not meta.get("branch"):
+            die(f"{tid} has no branch to review")
+        git("checkout", meta["branch"])  # so the reviewer reads and runs the code under review
 
     resumed = meta["status"] == running
     if not resumed:
@@ -264,11 +278,14 @@ def cmd_start(args):
     executor = cfg["stages"].get(stage, {})
     print(f"TICKET: {tid}\nPATH: {path}\nSTAGE: {stage}\nRESUMED: {'yes' if resumed else 'no'}")
     if meta.get("branch"):
-        print(f"BRANCH: {meta['branch']}")
+        print(f"BRANCH: {meta['branch']}\nBASE: {cfg['base_branch']}")
     print("EXECUTOR: " + json.dumps(executor))
     for name in ("Review notes", "QA notes"):
         if stage == "build" and section(body, name):
             print(f"\n### Bounce-back: address these {name}\n{section(body, name)}")
+    if stage == "review":
+        stat = git("diff", "--stat", f"{cfg['base_branch']}...{meta['branch']}")
+        print(f"\n### Diff to review (full: git diff {cfg['base_branch']}...{meta['branch']})\n{stat}")
 
     env = ticket_env(meta, path)
     cap = cfg["context_max_chars"]
@@ -298,7 +315,19 @@ def builtin_gate(cfg, stage, meta, body):
             problems.append("uncommitted changes outside .team/")
         if not section(body, "Implementation notes"):
             problems.append("Implementation notes is empty")
+    if stage == "review":
+        v = verdict(body)
+        if not v:
+            problems.append("Review notes must end with 'VERDICT: approve' or 'VERDICT: changes'")
+        elif v == "changes":
+            problems.append("reviewer asked for changes, see Review notes")
     return problems
+
+
+def verdict(body):
+    lines = section(body, "Review notes").splitlines()
+    m = re.search(r"VERDICT:\s*(approve|changes)\b", lines[-1], re.I) if lines else None
+    return m.group(1).lower() if m else None
 
 
 def cmd_finish(args):
@@ -308,7 +337,7 @@ def cmd_finish(args):
     cfg = load_config()
     path = find(tid)
     meta, body = parse(path)
-    running, passed, failed = STAGES[stage]
+    running, failed = STAGES[stage]
     if meta["status"] != running:
         die(f"{tid} is '{meta['status']}', not '{running}'. Run `start {stage} {tid}` first")
 
@@ -329,6 +358,8 @@ def cmd_finish(args):
         print(f"WARN (advancing anyway, gate mode is warn): {w}")
         body = log(meta, body, f"WARN {stage} gate failed: {gate['run']}")
     if problems:
+        if stage == "review" and not verdict(body):
+            failed = WAITS["review"]  # the review itself didn't finish: rerun it, don't rebuild
         reason = "user gate failed" if problems[0].startswith("gate `") else problems[0]
         body = log(meta, body, f"{stage} gate failed → {failed}: {reason.splitlines()[0][:100]}")
         meta["status"] = failed
@@ -337,10 +368,13 @@ def cmd_finish(args):
         for p in problems:
             print(f"  - {p}")
         sys.exit(1)
+    passed = passed_status(cfg, meta, stage)
     body = log(meta, body, f"{running} → {passed}")
     meta["status"] = passed
     write(path, meta, body)
     print(f"PASS: {tid} → {passed}")
+    if nxt := next_stage(cfg, meta):
+        print(f"NEXT: /sprintkit:{nxt} {tid}")
 
 
 # ---------- sprint queue + autopilot ----------
@@ -378,12 +412,12 @@ def cmd_queue(args):
 def failed_attempts(body, stage):
     """Failures of this stage since the ticket was last queued or last passed it."""
     count = 0
-    passed = STAGES[stage][1]
+    running = STAGES[stage][0]
     for line in section(body, "Log").splitlines():
-        if line.endswith(" queued") or f"→ {passed}" in line.split(" gate failed")[0]:
-            count = 0
-        elif f" {stage} gate failed" in line:
+        if f" {stage} gate failed" in line:
             count += 1
+        elif line.endswith(" queued") or f" {running} → " in line:  # "<running> → <next>" is a pass
+            count = 0
     return count
 
 
@@ -405,14 +439,17 @@ def cmd_next(_):
         meta, body = parse(hits[0])
         stage = next_stage(cfg, meta)
         reason = None
+        # all stages, not just the next one: review rejections send the ticket back to build
+        fails = {s: failed_attempts(body, s) for s in STAGES}
+        worst = max(fails, key=fails.get)
         if not stage:
             queue_remove(tid, q)
             print(f"DEQUEUED: {tid} is '{meta['status']}', nothing more the autopilot can run")
             continue
         if cfg["stages"].get(stage, {}).get("human"):
             reason = f"{stage} is set to a human executor"
-        elif (n := failed_attempts(body, stage)) >= limit:
-            reason = f"{stage} gate failed {n}x, needs a look"
+        elif fails[worst] >= limit:
+            reason = f"{worst} gate failed {fails[worst]}x, needs a look"
         if reason:
             block(hits[0], meta, body, reason)
             queue_remove(tid, q)

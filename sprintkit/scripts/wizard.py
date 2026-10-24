@@ -140,7 +140,8 @@ def discover(cwd):
         "user": {"agents": user_agents, "skills": user_skills},
         "project": {"agents": proj_agents, "skills": proj_skills},
         "checks": detect_checks(cwd), "context": context,
-        "defaults": {"refine": {"agent": "sprintkit:tech-lead"}, "build": {"agent": "sprintkit:developer"}},
+        "defaults": {"refine": {"agent": "sprintkit:tech-lead"}, "build": {"agent": "sprintkit:developer"},
+                     "review": {"agent": "sprintkit:reviewer"}},
     }
 
 

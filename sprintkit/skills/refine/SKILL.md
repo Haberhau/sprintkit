@@ -15,6 +15,6 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
    - `{}` or missing: no executor is configured. Tell the user and stop.
 
 3. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" finish refine $ARGUMENTS`.
-   - PASS: say so in one line and name the next step: /sprintkit:build <ID>.
+   - PASS: say so in one line and name the `NEXT:` command from the output.
    - FAIL: list the problems. The ticket has already been moved to its fail status. Offer to run the stage again.
    - WARN lines: mention them. The ticket advanced anyway because that gate's mode is warn.

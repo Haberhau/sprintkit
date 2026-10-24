@@ -15,6 +15,6 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
    - `{}` or missing: no executor is configured. Tell the user and stop.
 
 3. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" finish build $ARGUMENTS`.
-   - PASS: say so in one line and name the next step: review (not in the MVP yet).
+   - PASS: say so in one line and name the `NEXT:` command if the output has one. Without one, the ticket is done or waits on a stage that isn't built yet.
    - FAIL: list the problems. The ticket has already been moved to its fail status. Offer to run the stage again.
    - WARN lines: mention them. The ticket advanced anyway because that gate's mode is warn.

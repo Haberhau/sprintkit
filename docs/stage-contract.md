@@ -67,6 +67,8 @@ branch: PROJ-12-login-form # set by build
 - 2026-10-22T14:03 refined → in-progress (build: my-dev)
 ```
 
+Every stage advances a ticket to the status the next stage of its flow (§5) waits in, or to `done` after the flow's last stage.
+
 **Ownership rule:** each section is written by exactly one stage. Executors may
 read everything, but write only their own section (plus code for `build`, tests for `qa`).
 Executors never touch `status` or `## Log` — that's the runner's job.
@@ -112,19 +114,20 @@ Every stage follows the same run sequence:
 | **Output** | Code on the branch, commits referencing the ticket ID, `## Implementation notes` |
 | **Default executor** | `developer` agent |
 | **Built-in gate** | branch has ≥1 commit containing the ID; working tree clean; user gate (e.g. `npm run lint`) |
-| **Pass →** | `in-review` |
+| **Pass →** | the status the next stage of the flow waits in (`in-review` for a story, `in-qa` for a bug), or `done` if build is the last stage (spike, chore) |
 | **Fail →** | stays `in-progress` |
 
 ### `review`
 | | |
 |---|---|
 | **Precondition** | `status: in-review` |
+| **Runner prep** | checks out `branch`; status `reviewing` while it runs |
 | **Input** | Diff of `branch` vs main + ticket |
 | **Output** | `## Review notes` ending in a verdict line: `VERDICT: approve` or `VERDICT: changes` |
 | **Default executor** | `reviewer` agent |
 | **Built-in gate** | verdict line present and `approve` |
 | **Pass →** | `in-qa` |
-| **Fail →** | back to `refined` → next `build` run gets Review notes as input |
+| **Fail →** | `changes`: back to `refined` → next `build` run gets Review notes as input. No verdict: back to `in-review`, the review reruns |
 
 ### `qa`
 | | |
