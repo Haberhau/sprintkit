@@ -208,6 +208,8 @@ def check_review():
         fill(spike, "Implementation notes", "Use SQLite.")
         sh("git commit -q --allow-empty -m 'APP-2 decision record'")
         assert "PASS: APP-2 → done" in run("finish", "build", "APP-2")
+        assert subprocess.check_output(["git", "branch", "--show-current"], text=True).strip() == "main"
+        assert "APP-2 decision record" in subprocess.check_output(["git", "log", "--oneline", "main"], text=True)
         run("start", "review", "APP-2", ok=False)
         sh("git checkout -q main")
         chore = Path(run("new", "chore", "Bump deps").strip())
@@ -285,7 +287,7 @@ def check_qa():
         fill(bug2, "QA notes", "Checked.")
         out = run("finish", "qa", "APP-2", ok=False)
         assert "BLOCKED: APP-2" in out and "total.txt" in out
-        assert status(bug2) == "in-qa" and "blocked: true" in bug2.read_text()
+        assert status(bug2) == "testing" and "blocked: true" in bug2.read_text()
         assert git("branch", "--show-current") == "APP-2-wrong-total" and not git("status", "--porcelain", "--untracked-files=no")
         assert git("show", "main:total.txt") == "other" and run("queue").strip() == "queue is empty"
 
@@ -438,9 +440,10 @@ def check_release():
         # retro: numbers from the Logs, the file must hold a process change (SK-8)
         story = paths[0]
         story.write_text(story.read_text().replace("## Log\n", "## Log\n- 2026-10-01T10:00 refined → in-progress (build)\n"
-            "- 2026-10-01T11:00 review gate failed → refined: reviewer asked for changes\n- 2026-10-01T13:30 testing → done\n"))
+            "- 2026-10-01T11:00 review gate failed → refined: reviewer asked for changes\n"
+            "- 2026-10-01T11:05 blocked: review gate failed 2x, needs a look\n- 2026-10-01T13:30 testing → done\n"))
         out = run("retro", "start")
-        assert "RELEASE: v0.1.0" in out and "| APP-1 Dark mode | story | 1 | 1 | 0 | 0 | 3.5 |" in out
+        assert "RELEASE: v0.1.0" in out and "| APP-1 Dark mode | story | 1 | 1 | 0 | 1 | 3.5 |" in out
         assert "APP-3" not in out  # the spike wasn't released
         assert "doesn't exist" in run("retro", "finish", ok=False)
         Path(".team/retros/v0.1.0.md").write_text("# Retro v0.1.0\n\n## Went well\n- all\n")

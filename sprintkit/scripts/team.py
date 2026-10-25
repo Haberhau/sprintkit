@@ -475,15 +475,16 @@ def cmd_finish(args):
         for p in problems:
             print(f"  - {p}")
         sys.exit(1)
-    if stage == "qa" and (conflicts := merge(cfg, meta)):
-        # a rerun of qa can't fix this, so block instead of failing the gate
-        meta["status"] = WAITS["qa"]
+    passed = passed_status(cfg, meta, stage)
+    merging = passed == "done" and meta.get("branch")  # whatever stage ends the flow (qa, or build for spikes/chores)
+    if merging and (conflicts := merge(cfg, meta)):
+        # rerunning the executor can't fix this, so block (status stays mid-stage) instead of failing the gate
         block(path, meta, body, f"merge into {cfg['base_branch']} conflicts: {', '.join(conflicts)}")
         queue_remove(tid)
-        print(f"BLOCKED: {tid} passed QA but conflicts with {cfg['base_branch']} in: {', '.join(conflicts)}\n"
-              f"Merge {cfg['base_branch']} into {meta['branch']}, then re-queue it or run qa again.")
+        print(f"BLOCKED: {tid} passed {stage} but conflicts with {cfg['base_branch']} in: {', '.join(conflicts)}\n"
+              f"Merge {cfg['base_branch']} into {meta['branch']}, then re-queue it or run {stage} again.")
         sys.exit(1)
-    if stage == "qa" and uses_graphify(cfg):
+    if merging and uses_graphify(cfg):
         # the base branch just changed; keep the graph that context providers query current
         r = sh("graphify update .")
         if r.returncode:
@@ -491,7 +492,6 @@ def cmd_finish(args):
             body = log(meta, body, "WARN graphify update failed after merge")
         else:
             print("GRAPH: refreshed (graphify update .)")
-    passed = passed_status(cfg, meta, stage)
     body = log(meta, body, f"{running} → {passed}")
     meta["status"] = passed
     write(path, meta, body)
@@ -756,7 +756,7 @@ def ticket_stats(body):
     ended = next((datetime.strptime(l[2:18], "%Y-%m-%dT%H:%M") for l in lines if l.endswith("→ done")), None)
     hours = round((ended - began).total_seconds() / 3600, 1) if began and ended else None
     return {"bounces": sum("gate failed → refined" in l for l in lines),
-            "gate_failures": sum(" gate failed" in l and " WARN " not in l for l in lines),
+            "gate_failures": sum(" gate failed" in l and " WARN " not in l and " blocked: " not in l for l in lines),
             "warnings": sum(" WARN " in l for l in lines),
             "blocked": sum(" blocked: " in l for l in lines),
             "hours": hours, "log_lines": len(stamps)}

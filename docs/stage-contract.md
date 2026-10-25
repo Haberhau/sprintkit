@@ -137,7 +137,7 @@ Every stage follows the same run sequence:
 | **Output** | Tests covering each AC item (committed on the branch), AC boxes ticked, `## QA notes`; out-of-scope bugs filed as new `bug` tickets. A `bug` has no refine, so QA writes its AC first if there are none |
 | **Default executor** | `qa-engineer` agent |
 | **Built-in gate** | ≥1 AC item and all ticked; QA notes non-empty; working tree clean; user gate (e.g. `npm test`) |
-| **Pass →** | runner merges `branch` into main (`--no-ff`) → `done`. On a merge conflict the merge is aborted and the ticket stays `in-qa`, blocked |
+| **Pass →** | runner merges `branch` into main (`--no-ff`) → `done`. On a merge conflict the merge is aborted and the ticket stays mid-stage, blocked. The same merge happens for any flow's last stage, e.g. build for chores and spikes |
 | **Fail →** | back to `refined` with QA notes |
 
 ### `sanity` (release-level)
@@ -273,7 +273,7 @@ command. A title like `"; rm -rf ~` must stay a harmless string.
 
 ## 9. Decisions and open questions
 
-- **Decided: merge on `qa` pass.** Main only ever holds QA'd work.
+- **Decided: merge when a ticket reaches `done`**, i.e. on `qa` pass for stories and bugs, on `build` pass for chores and spikes (their flows end there). Main only holds work that passed its whole flow.
 - **Decided: user gates default to `warn`.** Built-in structural gates (§4) always block — the next stage can't work without their outputs.
 
 1. **Parallel tickets** — allow >1 ticket `in-progress`? Solo default: one at a time. The guard hook (`"guard": warn|block|off`) flags code edits while no ticket is `in-progress` or `testing`.

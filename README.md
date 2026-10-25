@@ -6,7 +6,7 @@
 
 ## Why
 
-Coding agents are fast, and they skip the parts of a team process that catch mistakes: nobody writes acceptance criteria first, nobody reviews the diff, nobody checks each criterion has a test. sprintkit puts that process back without adding a person: every ticket goes through **refine → build → review → QA**, each stage has a gate that has to pass, and work only reaches `main` after QA.
+Coding agents are fast, and they skip the parts of a team process that catch mistakes: nobody writes acceptance criteria first, nobody reviews the diff, nobody checks each criterion has a test. sprintkit puts that process back without adding a person: every ticket goes through **refine → build → review → QA**, each stage has a gate that has to pass, and work only reaches `main` once its ticket has passed its whole flow.
 
 sprintkit owns the **process**. You choose **who** does each stage: the shipped agents, your own agents or skills, a shell command, or yourself.
 
