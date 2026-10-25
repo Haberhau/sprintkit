@@ -2,7 +2,7 @@
 name: qa
 description: Run the qa stage on one sprintkit ticket - precondition check, executor, gates, and merge into the base branch on pass.
 argument-hint: "<ticket ID>"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" *)
 ---
 
 1. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" start qa $ARGUMENTS`. If it errors, show the error and stop.

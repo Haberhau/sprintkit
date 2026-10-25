@@ -2,7 +2,7 @@
 name: release
 description: Release all done sprintkit tickets - sanity check on the base branch, changelog, deploy command, git tag.
 argument-hint: "[vX.Y.Z]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" *)
 ---
 
 1. Sanity. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" sanity` (add `--version $ARGUMENTS` if a version was given).

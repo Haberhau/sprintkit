@@ -2,7 +2,7 @@
 name: ticket
 description: Create a sprintkit ticket (story, bug, chore or spike) from a short description.
 argument-hint: "<story|bug|chore|spike> <what it is about>"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" *)
 ---
 
 Arguments: $ARGUMENTS

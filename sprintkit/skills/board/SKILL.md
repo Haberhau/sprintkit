@@ -2,7 +2,7 @@
 name: board
 description: Open the live sprintkit board in the browser - tickets move as stages run, new tickets can be created there. Use "text" as argument for a terminal view.
 argument-hint: "[text]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" *)
 ---
 
 If the argument is `text`: run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" board` and show the output as-is in a code block. Stop.

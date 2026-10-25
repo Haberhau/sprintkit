@@ -2,7 +2,7 @@
 name: init
 description: Set up sprintkit for a project. Picks or creates the project folder, then opens a setup screen for GitHub, which agents and skills run each stage, which plugins this project uses, and quality checks.
 argument-hint: "[new <project name>]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" *)
 ---
 
 ## 1. The folder (your part: a browser can't pick folders)

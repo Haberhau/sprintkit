@@ -1,7 +1,7 @@
 ---
 name: sprint
 description: Autopilot - work through the sprint queue ticket by ticket, running each ticket's next stage until the queue is empty. Tickets that keep failing a gate get blocked and skipped.
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" *)
 ---
 
 You are running the sprint on autopilot. Don't ask the user anything between tickets. The queue and the gates decide what happens.

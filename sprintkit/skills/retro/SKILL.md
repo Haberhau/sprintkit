@@ -2,7 +2,7 @@
 name: retro
 description: Look back on a sprintkit release - process numbers from the ticket Logs, what bounced, and one concrete process change.
 argument-hint: "[vX.Y.Z]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" *)
 ---
 
 1. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" retro start $ARGUMENTS` (no argument: the latest release). If it errors, show the error and stop.

@@ -2,7 +2,7 @@
 name: review
 description: Run the review stage on one sprintkit ticket - precondition check, diff, executor, verdict gate.
 argument-hint: "<ticket ID>"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" *)
 ---
 
 1. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" start review $ARGUMENTS`. If it errors, show the error and stop.

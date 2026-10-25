@@ -30,7 +30,7 @@ Then run the full test suite and the linter if they're reasonably fast. Somethin
 
 ## 3. Out-of-scope bugs
 
-Problems you find outside this ticket's criteria don't fail it. File each as a new ticket with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" new bug "<title>"`, then fill its Description: steps to reproduce, expected, actual.
+Problems you find outside this ticket's criteria don't fail it. File each as a new ticket with the `RUNNER` command from your prompt: `<RUNNER> new bug "<title>"`. It prints the new ticket's path; fill its Description: steps to reproduce, expected, actual.
 
 ## 4. Commit and write QA notes
 

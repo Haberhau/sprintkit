@@ -11,9 +11,13 @@ MVP status: `refine`, `build`, `review`, `qa` (merges into the base branch on pa
 
 ## Try it
 
-```bash
-claude --plugin-dir ./sprintkit
+Install (works in the Claude Code app and the terminal):
 ```
+/plugin marketplace add Haberhau/sprintkit
+/plugin install sprintkit@sprintkit
+```
+For development, `claude --plugin-dir ./sprintkit` loads it straight from a checkout, in the terminal only: the desktop app ignores `--plugin-dir`.
+
 Then, in your project:
 ```
 /sprintkit:init                      (or: /sprintkit:init new my-app)

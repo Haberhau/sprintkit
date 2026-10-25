@@ -293,7 +293,8 @@ def cmd_start(args):
     write(path, meta, body)
 
     executor = cfg["stages"].get(stage, {})
-    print(f"TICKET: {tid}\nPATH: {path}\nSTAGE: {stage}\nRESUMED: {'yes' if resumed else 'no'}")
+    print(f"TICKET: {tid}\nPATH: {path}\nSTAGE: {stage}\nRESUMED: {'yes' if resumed else 'no'}\n"
+          f"RUNNER: python3 \"{Path(__file__).resolve()}\"")
     if meta.get("branch"):
         print(f"BRANCH: {meta['branch']}\nBASE: {cfg['base_branch']}")
     print("EXECUTOR: " + json.dumps(executor))
