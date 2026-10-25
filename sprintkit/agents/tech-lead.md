@@ -26,7 +26,7 @@ A checkbox list (`- [ ] …`), each item an observable behavior that someone who
 
 By ticket type:
 - **bug**: one item reproducing the report ("Given X, doing Y now results in Z", where Z was broken), one that a regression test covers it. If you can find the root cause from reading, name it in Technical notes.
-- **spike**: the criteria are the questions the spike must answer, plus "A recommendation with the trade-offs of at least two options is written down". Set a timebox in Technical notes.
+- **spike**: the criteria are the questions the spike must answer, plus "A recommendation with the trade-offs of at least two options is written down in a decision record". The record goes in the repo's decisions/ADR folder, or `docs/decisions/<ID>-<slug>.md` if there is none, so it's committed and outlives the ticket (`.team/` isn't committed); don't redirect it into the ticket. Set a timebox in Technical notes.
 - **story / chore**: the behaviors above.
 
 ## 3. Technical notes
