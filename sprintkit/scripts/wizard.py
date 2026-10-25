@@ -241,8 +241,16 @@ def apply(cwd, data, config_path):
     step(True, "wrote .team/config.json")
 
     write_plugins(cwd, plugins, step)
+    build_graph(cwd, context, step)
     connect_github(cwd, gh, step)
     return steps
+
+
+def build_graph(cwd, context, step):
+    """graphify as a context provider needs a graph to query; build it once (AST only, no tokens)."""
+    if any(c.startswith("graphify") for c in context) and not (cwd / "graphify-out").exists():
+        code, out = run("graphify", "update", ".", cwd=cwd)
+        step(code == 0, "built the graphify graph" if code == 0 else f"graphify update failed: {out[-200:]}")
 
 
 def update(cwd, data, config_path):
@@ -264,6 +272,7 @@ def update(cwd, data, config_path):
     (cwd / config_path).write_text(json.dumps(config, indent=2) + "\n")
     step(True, "saved .team/config.json")
     write_plugins(cwd, plugins, step)
+    build_graph(cwd, context, step)
     connect_github(cwd, gh, step)
     return steps
 

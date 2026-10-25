@@ -44,7 +44,7 @@ Fix what you find.
 
 ## 5. Commit and hand over
 
-- Commit with the ticket ID in each message, e.g. `APP-12 Add login form validation`. Stage files explicitly and never commit `.team/`. Prefer a few meaningful commits over one dump or many fragments. Leave no uncommitted changes outside `.team/`: the gate checks.
+- Commit with the ticket ID in each message, e.g. `APP-12 Add login form validation`. Stage files explicitly and never commit `.team/`. Prefer a few meaningful commits over one dump or many fragments. Leave no uncommitted changes outside `.team/`: the gate checks. Files that were already untracked before you started don't count; leave them alone.
 - Write **Implementation notes** in the ticket. A reviewer reads them before the diff, so keep them short and don't repeat what the diff shows:
   - **Changes**: what changed and where, in a few lines.
   - **Criteria**: each criterion and how it's met (test name, or how you checked it).

@@ -13,6 +13,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -22,6 +23,7 @@ TEAM = Path(".team")
 TICKETS = TEAM / "tickets"
 CONFIG = TEAM / "config.json"
 QUEUE = TEAM / "queue.json"
+UNTRACKED = TEAM / "untracked.json"  # ticket -> untracked files that existed when its stage started
 
 # stage -> (status while running, status on fail). The pass status comes from the flow.
 STAGES = {
@@ -272,6 +274,10 @@ def cmd_start(args):
         git("checkout", meta["branch"])  # so the executor reads and runs the code under test
 
     resumed = meta["status"] == running
+    if stage in ("build", "qa") and not resumed:
+        # files that were already untracked aren't the stage's work; the clean-tree gate ignores them
+        known = json.loads(UNTRACKED.read_text()) if UNTRACKED.exists() else {}
+        UNTRACKED.write_text(json.dumps({**known, tid: sorted(untracked())}, indent=1) + "\n")
     if not resumed:
         body = log(meta, body, f"{meta['status']} → {running} ({stage})")
         meta["status"] = running
@@ -313,8 +319,8 @@ def builtin_gate(cfg, stage, meta, body):
         id_re = f"{meta['id']}([^0-9]|$)"  # PROJ-1 must not match PROJ-12
         if not sh(f"git log {cfg['base_branch']}..HEAD --oneline -E --grep='{id_re}'").stdout.strip():
             problems.append(f"no commit on {meta['branch']} mentions {meta['id']}")
-        if sh("git status --porcelain -- . ':!.team'").stdout.strip():
-            problems.append("uncommitted changes outside .team/")
+        if left := uncommitted(meta):
+            problems.append(f"uncommitted changes outside .team/: {', '.join(left[:5])}")
         if not section(body, "Implementation notes"):
             problems.append("Implementation notes is empty")
     if stage == "review":
@@ -329,9 +335,25 @@ def builtin_gate(cfg, stage, meta, body):
             problems.append("every Acceptance criteria box must be ticked '- [x]'")
         if not section(body, "QA notes"):
             problems.append("QA notes is empty")
-        if sh("git status --porcelain -- . ':!.team'").stdout.strip():
-            problems.append("uncommitted changes outside .team/")
+        if left := uncommitted(meta):
+            problems.append(f"uncommitted changes outside .team/: {', '.join(left[:5])}")
     return problems
+
+
+def uses_graphify(cfg):
+    return bool(shutil.which("graphify")) and (
+        Path("graphify-out").exists() or any("graphify" in c for c in cfg["context"]))
+
+
+def untracked():
+    return set(sh("git ls-files --others --exclude-standard -- . ':!.team'").stdout.splitlines())
+
+
+def uncommitted(meta):
+    """Changes the stage left uncommitted: edited tracked files, and untracked files new since start."""
+    known = set(json.loads(UNTRACKED.read_text()).get(meta["id"], [])) if UNTRACKED.exists() else set()
+    tracked = [line[3:] for line in sh("git status --porcelain --untracked-files=no -- . ':!.team'").stdout.splitlines()]
+    return tracked + sorted(untracked() - known)
 
 
 def merge(cfg, meta):
@@ -400,6 +422,14 @@ def cmd_finish(args):
         print(f"BLOCKED: {tid} passed QA but conflicts with {cfg['base_branch']} in: {', '.join(conflicts)}\n"
               f"Merge {cfg['base_branch']} into {meta['branch']}, then re-queue it or run qa again.")
         sys.exit(1)
+    if stage == "qa" and uses_graphify(cfg):
+        # the base branch just changed; keep the graph that context providers query current
+        r = sh("graphify update .")
+        if r.returncode:
+            print(f"WARN graphify update failed (exit {r.returncode}), the graph is stale: {(r.stdout + r.stderr).strip()[:300]}")
+            body = log(meta, body, "WARN graphify update failed after merge")
+        else:
+            print("GRAPH: refreshed (graphify update .)")
     passed = passed_status(cfg, meta, stage)
     body = log(meta, body, f"{running} → {passed}")
     meta["status"] = passed

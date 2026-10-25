@@ -34,7 +34,7 @@ Problems you find outside this ticket's criteria don't fail it. File each as a n
 
 ## 4. Commit and write QA notes
 
-- Commit your tests on the branch with the ticket ID in the message, e.g. `APP-12 Add tests for login validation`. Stage files explicitly, never commit `.team/`, leave no uncommitted changes outside `.team/`: the gate checks.
+- Commit your tests on the branch with the ticket ID in the message, e.g. `APP-12 Add tests for login validation`. Stage files explicitly, never commit `.team/`, leave no uncommitted changes outside `.team/`: the gate checks. Files that were already untracked when you started don't count; leave them alone.
 - Fix only tests. If the product code is wrong, leave the box unticked and say why; the developer fixes it.
 - Replace the whole QA notes section with:
   - **Ran**: the commands you ran and their results.

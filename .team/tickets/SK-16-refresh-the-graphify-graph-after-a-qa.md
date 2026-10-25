@@ -2,7 +2,7 @@
 id: SK-16
 type: story
 title: Refresh the graphify graph after a QA merge
-status: backlog
+status: done
 blocked: false
 ---
 
@@ -14,6 +14,8 @@ The context provider `graphify query "$TICKET_TITLE"` only reads a graph; nothin
 ## Technical notes
 
 ## Implementation notes
+- **Changes**: after a successful QA merge, the runner runs `graphify update .` on the base branch when graphify is installed and the project uses it (`graphify-out/` exists or a context command calls graphify). A failure prints and logs a WARN; the ticket still goes to done. Setup and Settings build the graph once (`wizard.build_graph`) when a graphify context command is selected and there's no graph yet.
+- **Tests**: `check_qa()` puts a fake `graphify` on PATH and checks it's called with `update .` after the merge.
 
 ## Review notes
 
@@ -21,3 +23,4 @@ The context provider `graphify query "$TICKET_TITLE"` only reads a graph; nothin
 
 ## Log
 - 2026-10-24T22:35 created → backlog
+- 2026-10-25T11:18 backlog → done (built by hand while bootstrapping)

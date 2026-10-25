@@ -253,7 +253,17 @@ def check_qa():
         sh("git add test_save.txt && git commit -q -m 'APP-1 test'")
         run("finish", "build", "APP-1")
         run("start", "qa", "APP-1")
-        assert "PASS: APP-1 → done" in run("finish", "qa", "APP-1")
+        # a fake graphify on PATH: the runner refreshes the graph after the merge (SK-16)
+        Path("bin").mkdir()
+        Path("bin/graphify").write_text("#!/bin/sh\necho \"$@\" > .git/graph-updated\n")
+        os.chmod("bin/graphify", 0o755)
+        Path("graphify-out").mkdir()
+        os.environ["PATH"] = f"{Path('bin').resolve()}:{os.environ['PATH']}"
+        sh("echo bin/ >> .git/info/exclude")
+        out = run("finish", "qa", "APP-1")
+        assert "PASS: APP-1 → done" in out and "GRAPH: refreshed" in out
+        assert Path(".git/graph-updated").read_text().strip() == "update ."
+        os.environ["PATH"] = os.environ["PATH"].split(":", 1)[1]
         assert git("branch", "--show-current") == "main" and Path("save.txt").read_text() == "fix 1"
         assert git("log", "-1", "--format=%s") == "APP-1 Merge APP-1-crash-on-save"
         assert len(git("log", "-1", "--format=%P").split()) == 2  # a merge commit, not a fast-forward
@@ -270,6 +280,19 @@ def check_qa():
         assert status(bug2) == "in-qa" and "blocked: true" in bug2.read_text()
         assert git("branch", "--show-current") == "APP-2-wrong-total" and not git("status", "--porcelain", "--", ".", ":!.team")
         assert git("show", "main:total.txt") == "other" and run("queue").strip() == "queue is empty"
+
+        # files untracked before a stage started don't count as its uncommitted work (SK-17)
+        sh("git checkout -q main")
+        Path("notes-before.txt").write_text("already here")
+        chore = Path(run("new", "chore", "Tidy").strip())
+        run("start", "build", "APP-3")
+        fill(chore, "Implementation notes", "Tidied.")
+        sh("git commit -q --allow-empty -m 'APP-3 tidy'")
+        Path("forgot.txt").write_text("new during build")
+        out = run("finish", "build", "APP-3", ok=False)
+        assert "forgot.txt" in out and "notes-before.txt" not in out
+        Path("forgot.txt").unlink()
+        assert "PASS: APP-3 → done" in run("finish", "build", "APP-3")
 
 
 def check_setup():
