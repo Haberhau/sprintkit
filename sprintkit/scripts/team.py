@@ -355,14 +355,18 @@ def uses_graphify(cfg):
         Path("graphify-out").exists() or any("graphify" in c for c in cfg["context"]))
 
 
+# not the stage's work: sprintkit's own state, and graphify's generated graph (agents refresh it after edits)
+NOT_WORK = "-- . ':!.team' ':!graphify-out'"
+
+
 def untracked():
-    return set(sh("git ls-files --others --exclude-standard -- . ':!.team'").stdout.splitlines())
+    return set(sh(f"git ls-files --others --exclude-standard {NOT_WORK}").stdout.splitlines())
 
 
 def uncommitted(meta):
     """Changes the stage left uncommitted: edited tracked files, and untracked files new since start."""
     known = set(json.loads(UNTRACKED.read_text()).get(meta["id"], [])) if UNTRACKED.exists() else set()
-    tracked = [line[3:] for line in sh("git status --porcelain --untracked-files=no -- . ':!.team'").stdout.splitlines()]
+    tracked = [line[3:] for line in sh(f"git status --porcelain --untracked-files=no {NOT_WORK}").stdout.splitlines()]
     return tracked + sorted(untracked() - known)
 
 
