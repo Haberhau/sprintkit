@@ -65,6 +65,11 @@ Watch the cards move on the board.
 
 The server only listens on 127.0.0.1, rejects other `Host` headers, and only accepts JSON posts, so other websites can't create tickets.
 
+## Guard
+
+A hook checks every Edit/Write in a sprintkit project: code changes are expected while a ticket is being built or tested. Without one, Claude is told the edit happens outside the process. Ticket files in `.team/` are always fine, and projects without `.team/config.json` are never touched.
+`"guard": "warn"` (default), `"block"` (the edit is refused), or `"off"` in `.team/config.json`.
+
 ## Bring your own team
 
 `.team/config.json`:

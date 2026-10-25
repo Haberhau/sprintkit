@@ -272,6 +272,6 @@ command. A title like `"; rm -rf ~` must stay a harmless string.
 - **Decided: merge on `qa` pass.** Main only ever holds QA'd work.
 - **Decided: user gates default to `warn`.** Built-in structural gates (§4) always block — the next stage can't work without their outputs.
 
-1. **Parallel tickets** — allow >1 ticket `in-progress`? Solo default: one at a time, enforced by the edit-blocking hook.
+1. **Parallel tickets** — allow >1 ticket `in-progress`? Solo default: one at a time. The guard hook (`"guard": warn|block|off`) flags code edits while no ticket is `in-progress` or `testing`.
 2. **Token budget per stage** — add `max_turns` per executor? Skip until someone hits it.
 3. **External boards** (Jira/Linear/GitHub Issues) — one-way mirror of status from files, or two-way? One-way is far simpler; files stay the source of truth.

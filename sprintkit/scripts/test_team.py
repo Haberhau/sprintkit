@@ -331,6 +331,38 @@ def check_gate_setup():
         assert "RETRY" in out and "PASS: APP-1 → done" in out
 
 
+def check_guard():
+    import os
+    guard = TEAM.parent / "guard.py"
+
+    def edit(path, cwd):
+        r = subprocess.run([sys.executable, str(guard)], input=json.dumps(
+            {"tool_name": "Edit", "cwd": str(cwd), "tool_input": {"file_path": str(path)}}),
+            capture_output=True, text=True)
+        return r.returncode, r.stdout + r.stderr
+
+    with tempfile.TemporaryDirectory() as d:
+        os.chdir(d)
+        sh("git init -q -b main && git config user.email t@t && git config user.name t "
+           "&& git commit -q --allow-empty -m init")
+        assert edit("app.py", d) == (0, "")  # not a sprintkit project yet: silent
+        run("init", "--prefix", "APP")
+        chore = Path(run("new", "chore", "Bump").strip())
+        assert edit(chore, d) == (0, "")  # tickets are always editable
+        code, out = edit("src/app.py", d)
+        assert code == 0 and "additionalContext" in out and "src/app.py" in out  # default: warn
+        cfg = json.loads(Path(".team/config.json").read_text())
+        Path(".team/config.json").write_text(json.dumps({**cfg, "guard": "block"}))
+        code, out = edit(Path(d, "src/app.py"), "/")
+        assert code == 2 and "no ticket" in out
+        run("start", "build", "APP-1")
+        assert edit("src/app.py", d) == (0, "")  # a ticket is being built
+        Path(".team/config.json").write_text(json.dumps({**cfg, "guard": "off"}))
+        sh("git checkout -q main")
+        chore.write_text(chore.read_text().replace("status: in-progress", "status: done"))
+        assert edit("src/app.py", d) == (0, "")
+
+
 def check_setup():
     import os
     import urllib.request
@@ -525,6 +557,7 @@ def main():
     check_review()
     check_qa()
     check_gate_setup()
+    check_guard()
     check_setup()
     print("all checks passed")
 
