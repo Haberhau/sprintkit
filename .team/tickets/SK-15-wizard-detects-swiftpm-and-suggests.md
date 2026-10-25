@@ -2,7 +2,7 @@
 id: SK-15
 type: story
 title: Wizard detects SwiftPM and suggests swift test as a gate
-status: backlog
+status: done
 blocked: false
 ---
 
@@ -14,6 +14,8 @@ blocked: false
 ## Technical notes
 
 ## Implementation notes
+- **Changes**: `detect_checks()` in wizard.py suggests `swift test` when `Package.swift` exists.
+- **Criteria**: setup offers it as the build gate; Settings re-runs detection on every load and pre-fills the gate from the first detected check, so projects that became Swift packages after setup get the suggestion there too. Covered in `check_setup()`.
 
 ## Review notes
 
@@ -21,3 +23,4 @@ blocked: false
 
 ## Log
 - 2026-10-24T22:35 created → backlog
+- 2026-10-25T11:15 backlog → done (built by hand while bootstrapping)

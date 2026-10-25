@@ -2,7 +2,7 @@
 id: SK-18
 type: story
 title: Flag missing context tools and suggest common ones in setup
-status: backlog
+status: done
 blocked: false
 ---
 
@@ -20,6 +20,9 @@ Relevant code: `discover()` in sprintkit/scripts/wizard.py (context detection), 
 ## Technical notes
 
 ## Implementation notes
+- **Changes**: `wizard.tool_missing()` checks a context command's program against PATH (skips `VAR=x` prefixes; unparsable commands count as present). `discover()` returns `contextMissing` for detected and configured commands, and offers `git log --oneline -15` as an unticked suggestion in git repos. setup.html shows a red "isn't installed" line under missing commands, leaves them unticked in new setups, and the add-command label names all five ticket variables.
+- **Decisions**: suggested `git log` instead of ripgrep: a title search with rg rarely matches code, while recent commits are always available and useful. Commands typed into the field are checked on the next load, not live.
+- **Tests**: `check_setup()` asserts a configured command with a missing tool shows up in `contextMissing`.
 
 ## Review notes
 
@@ -27,3 +30,4 @@ Relevant code: `discover()` in sprintkit/scripts/wizard.py (context detection), 
 
 ## Log
 - 2026-10-25T11:12 created → backlog
+- 2026-10-25T11:15 backlog → done (built by hand while bootstrapping)

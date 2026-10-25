@@ -92,6 +92,8 @@ def detect_checks(cwd):
         checks.append({"run": "cargo test", "why": "Cargo.toml"})
     if (cwd / "go.mod").exists():
         checks.append({"run": "go test ./...", "why": "go.mod"})
+    if (cwd / "Package.swift").exists():
+        checks.append({"run": "swift test", "why": "Swift package (Package.swift)"})
     if (cwd / "Makefile").exists() and re.search(r"^test:", (cwd / "Makefile").read_text(errors="replace"), re.M):
         checks.append({"run": "make test", "why": "Makefile test target"})
     for proj in sorted(cwd.glob("*.xcodeproj"))[:1]:
@@ -101,6 +103,16 @@ def detect_checks(cwd):
         why = f"Xcode project, newest simulator: {sim['name']}" if sim else "Xcode project (no iPhone simulator found)"
         checks.append({"run": f"xcodebuild test -scheme {shlex.quote(proj.stem)}{dest}", "why": why})
     return checks
+
+
+def tool_missing(cmd):
+    """True if a context command's program isn't on PATH, so the command would only produce an error."""
+    try:
+        words = shlex.split(cmd)
+    except ValueError:
+        return False
+    words = [w for w in words if "=" not in w.split("/")[0]]  # skip leading VAR=value assignments
+    return bool(words) and shutil.which(words[0]) is None
 
 
 def discover(cwd):
@@ -123,12 +135,16 @@ def discover(cwd):
     context = []
     if shutil.which("graphify"):
         note = "" if (cwd / "graphify-out").exists() else " Run `graphify update .` once to build the graph."
-        context.append({"run": 'graphify query "$TICKET_TITLE"', "why": "graphify is installed." + note})
+        context.append({"run": 'graphify query "$TICKET_TITLE"', "why": "graphify is installed." + note, "on": True})
+    if (cwd / ".git").exists():
+        context.append({"run": "git log --oneline -15", "why": "Recent commits, so executors see what changed lately.", "on": False})
+    configured = read_json(cwd / ".team/config.json").get("context", [])
 
     sk_agents, _ = components(PLUGIN_ROOT, "sprintkit:")  # its skills are stage commands, not executors
     user_agents, user_skills = components(home / ".claude")
     proj_agents, proj_skills = components(cwd / ".claude")
     return {
+        "contextMissing": [c for c in dict.fromkeys(configured + [o["run"] for o in context]) if tool_missing(c)],
         "folder": str(cwd), "folderName": cwd.name, "prefix": suggest_prefix(cwd.name),
         "git": {"isRepo": git_ok,
                 "hasCommits": git_ok and run("git", "rev-parse", "--verify", "HEAD", cwd=cwd)[0] == 0,

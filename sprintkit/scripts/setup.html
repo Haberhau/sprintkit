@@ -40,6 +40,7 @@
             border-radius: 8px; margin: 8px 0; cursor: pointer; }
   .choice input { margin-top: 3px; }
   .choice .sub2 { color: var(--muted); font-size: 12px; }
+  .choice .missing { color: var(--fail); font-size: 12px; }
   .choice.disabled { opacity: .55; cursor: not-allowed; }
   .stage-row { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: center; margin: 10px 0; }
   .stage-row .name { font-weight: 600; }
@@ -124,7 +125,7 @@ async function load() {
   } else {
     state.prefix = info.prefix;
     for (const [s] of STAGES) { state.stages[s] = info.defaults[s] ? JSON.stringify(info.defaults[s]) : ""; state.stageSkills[s] = []; }
-    state.context = info.context.map((c) => c.run);
+    state.context = info.context.filter((c) => c.on && !info.contextMissing.includes(c.run)).map((c) => c.run);
     if (info.checks.length) state.gate = { on: true, run: info.checks[0].run, mode: "warn" };
   }
   $("nav").hidden = false;  // no Next before the project has been looked at
@@ -236,9 +237,10 @@ const views = [
     <p class="hint">Context runs before every stage and is handed to the executor. A gate runs after build: in <em>warn</em> mode a failure is logged and the ticket moves on, in <em>block</em> mode it stays until the gate passes.</p>
     <h3 style="font-size:14px;margin:16px 0 4px">Context</h3>
     ${state.contextOptions.map((c, i) => `<label class="choice"><input type="checkbox" data-context="${i}" ${state.context.includes(c.run) ? "checked" : ""}>
-      <span><code>${esc(c.run)}</code><span class="sub2"><br>${esc(c.why)}</span></span></label>`).join("")
+      <span><code>${esc(c.run)}</code><span class="sub2"><br>${esc(c.why)}</span>${info.contextMissing.includes(c.run)
+        ? `<span class="missing"><br>${esc(c.run.split(" ")[0])} isn't installed: this command will only hand the executor an error.</span>` : ""}</span></label>`).join("")
       || '<p class="hint">Nothing detected. Tools like graphify show up here when installed.</p>'}
-    <div class="gate"><div><label class="field" for="ctx-new">Add a context command (ticket data comes in as $TICKET_ID, $TICKET_TITLE, $TICKET_PATH)</label>
+    <div class="gate"><div><label class="field" for="ctx-new">Add a context command (ticket data comes in as $TICKET_ID, $TICKET_TITLE, $TICKET_TYPE, $TICKET_PATH, $TICKET_BRANCH)</label>
       <input type="text" id="ctx-new" class="mono" autocomplete="off" spellcheck="false" placeholder='rg -l "$TICKET_TITLE"'></div>
       <div style="align-self:end"><button type="button" id="ctx-add">Add</button></div></div>
     <h3 style="font-size:14px;margin:16px 0 4px">Build gate</h3>

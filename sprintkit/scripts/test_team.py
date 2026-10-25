@@ -289,6 +289,7 @@ def check_setup():
             {"version": 2, "plugins": {"acme@market": [{"installPath": str(plug)}]}}))
         Path(home, ".claude/settings.json").write_text(json.dumps({"enabledPlugins": {"acme@market": True}}))
         Path(proj, "package.json").write_text(json.dumps({"scripts": {"test": "jest"}}))
+        Path(proj, "Package.swift").write_text("// swift-tools-version:5.9\n")
         Path(proj, ".claude").mkdir()
         Path(proj, ".claude/settings.json").write_text(json.dumps({"permissions": {"allow": ["Bash(ls)"]}}))
 
@@ -314,6 +315,7 @@ def check_setup():
             assert acme["id"] == "acme@market" and acme["enabled"]
             assert acme["agents"][0]["id"] == "acme:fixer" and acme["skills"][0] == {"id": "acme:tdd", "description": ""}
             assert {"run": "npm test", "why": "package.json test script"} in info["checks"]
+            assert {"run": "swift test", "why": "Swift package (Package.swift)"} in info["checks"]
             assert not info["git"]["isRepo"] and info["prefix"] == "SHOP"
 
             # validation happens before anything is touched
@@ -343,11 +345,13 @@ def check_setup():
             assert b"Set up sprintkit" in urllib.request.urlopen(base + "/settings").read()  # same page, settings mode
             cfg_path = Path(proj, ".team/config.json")
             cfg = json.loads(cfg_path.read_text())
-            cfg.update({"flows": {"bug": ["build"]}, "context_max_chars": 900,
+            cfg.update({"flows": {"bug": ["build"]}, "context_max_chars": 900, "context": ["no-such-tool-xyz ."],
                         "gates": {**cfg["gates"], "qa": {"run": "make e2e", "mode": "block"}},
                         "stages": {**cfg["stages"], "qa": {"command": "./qa.sh"}}})
             cfg_path.write_text(json.dumps(cfg))
-            assert json.loads(urllib.request.urlopen(base + "/api/setup").read())["config"]["flows"] == {"bug": ["build"]}
+            info = json.loads(urllib.request.urlopen(base + "/api/setup").read())
+            assert info["config"]["flows"] == {"bug": ["build"]}
+            assert info["contextMissing"] == ["no-such-tool-xyz ."]  # flagged in Settings
 
             def save(data):
                 r = urllib.request.Request(base + "/api/settings", data=json.dumps(data).encode(),
