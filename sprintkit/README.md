@@ -7,7 +7,7 @@ sprintkit owns the **process**. You choose **who** does each stage: the shipped 
 backlog ─refine─▶ refined ─build─▶ in-review ─review─▶ in-qa ─qa─▶ done ─sanity─▶ ─deploy─▶ released
 ```
 
-MVP status: `refine`, `build`, `review`, `qa` (merges into the base branch on pass), the live board and the sprint autopilot work end to end. `sanity`, `deploy` and `retro` are specified in [docs/stage-contract.md](../docs/stage-contract.md) and not built yet.
+MVP status: `refine`, `build`, `review`, `qa` (merges into the base branch on pass), `sanity` + `deploy` (`/sprintkit:release`), the live board and the sprint autopilot work end to end. `retro` is specified in [docs/stage-contract.md](../docs/stage-contract.md) and not built yet.
 
 ## Try it
 
@@ -22,6 +22,7 @@ Then, in your project:
 /sprintkit:build APP-1
 /sprintkit:review APP-1
 /sprintkit:qa APP-1
+/sprintkit:release
 /sprintkit:board
 ```
 
@@ -64,6 +65,14 @@ Watch the cards move on the board.
 - Every build branch starts from the base branch, so tickets never stack on each other's unreviewed work.
 
 The server only listens on 127.0.0.1, rejects other `Host` headers, and only accepts JSON posts, so other websites can't create tickets.
+
+## Releases
+
+`/sprintkit:release` ships every `done` ticket (spikes are never released):
+1. **Sanity** runs `gates.sanity` (e.g. `npm run build && npm run smoke`) on the base branch. Pass → the tickets become release candidates, listed in `.team/releases/<version>.md`. Fail → nothing changes, and you're offered a bug ticket with the output.
+2. **Deploy**: the release-manager agent writes and commits a `CHANGELOG.md` entry, then the runner runs `gates.deploy`, tags the version and marks the tickets released. The tag isn't pushed.
+
+The version is the last `v*` tag bumped: minor when a story is included, patch otherwise, or `/sprintkit:release v2.0.0`. Release commands get `RELEASE_VERSION` in their environment.
 
 ## Guard
 

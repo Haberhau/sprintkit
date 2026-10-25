@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-STAGE_SLOTS = ["refine", "build", "review", "qa"]
+STAGE_SLOTS = ["refine", "build", "review", "qa", "deploy"]
 NAME = re.compile(r"[\w:.-]+")
 PLUGIN_ID = re.compile(r"[\w.-]+@[\w.-]+")
 REPO_URL = re.compile(r"(https://github\.com/|git@github\.com:)[\w.-]+/[\w.-]+?(\.git)?")
@@ -157,7 +157,8 @@ def discover(cwd):
         "project": {"agents": proj_agents, "skills": proj_skills},
         "checks": detect_checks(cwd), "context": context,
         "defaults": {"refine": {"agent": "sprintkit:tech-lead"}, "build": {"agent": "sprintkit:developer"},
-                     "review": {"agent": "sprintkit:reviewer"}, "qa": {"agent": "sprintkit:qa-engineer"}},
+                     "review": {"agent": "sprintkit:reviewer"}, "qa": {"agent": "sprintkit:qa-engineer"},
+                     "deploy": {"agent": "sprintkit:release-manager"}},
     }
 
 

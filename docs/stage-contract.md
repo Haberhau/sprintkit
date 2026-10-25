@@ -143,20 +143,22 @@ Every stage follows the same run sequence:
 ### `sanity` (release-level)
 | | |
 |---|---|
-| **Precondition** | ≥1 ticket `done` since last release |
-| **Output** | `releases/<version>.md` with included tickets + sanity result |
+| **Precondition** | ≥1 non-spike ticket `done`; no other release waiting for deploy |
+| **Runner prep** | checks out the base branch (no uncommitted tracked changes); version from `--version`, else the last `v*` tag bumped (minor if a story is included, patch otherwise; first release `v0.1.0`) |
+| **Output** | `.team/releases/<version>.md` with included tickets + sanity result |
 | **Default executor** | none — pure gate (shell) |
-| **Gate** | user command, e.g. `npm run build && npm run smoke` |
+| **Gate** | user command `gates.sanity`, e.g. `npm run build && npm run smoke`, with `RELEASE_VERSION` in env. None configured → WARN, passes |
 | **Pass →** | all included tickets → `release-candidate` |
 | **Fail →** | release blocked; runner offers to open a `bug` ticket with the output |
 
 ### `deploy` (release-level)
 | | |
 |---|---|
-| **Output** | Changelog entry, git tag, deploy executed |
-| **Default executor** | `release-manager` agent writes changelog; deploy itself is the user's command |
-| **Gate** | deploy command exit 0 (+ optional health check command) |
-| **Pass →** | tickets → `released` |
+| **Output** | `CHANGELOG.md` entry committed on the base branch, deploy executed, annotated tag `<version>` (not pushed) |
+| **Default executor** | `release-manager` agent writes and commits the changelog; deploy itself is the user's command |
+| **Gate** | committed `CHANGELOG.md` mentions the version; clean tree; deploy command `gates.deploy` exit 0. Always blocks, whatever `gate_default_mode` says: a failed deploy isn't a release |
+| **Pass →** | tag created, tickets → `released` |
+| **Fail →** | release back to candidate, nothing tagged |
 
 ### `retro` (sprint-level, optional)
 | | |

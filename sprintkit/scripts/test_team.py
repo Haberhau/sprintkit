@@ -363,6 +363,59 @@ def check_guard():
         assert edit("src/app.py", d) == (0, "")
 
 
+def check_release():
+    import os
+    with tempfile.TemporaryDirectory() as d:
+        os.chdir(d)
+        sh("git init -q -b main && git config user.email t@t && git config user.name t "
+           "&& git commit -q --allow-empty -m init")
+        run("init", "--prefix", "APP")
+        git = lambda *a: subprocess.check_output(["git", *a], text=True).strip()
+        assert "no done tickets" in run("sanity", ok=False)
+        paths = [Path(run("new", kind, title).strip()) for kind, title in
+                 (("story", "Dark mode"), ("bug", "Crash on save"), ("spike", "Pick a DB"), ("chore", "Unfinished"))]
+        for t in paths[:3]:
+            t.write_text(t.read_text().replace("status: backlog", "status: done"))
+
+        def gates(**g):
+            cfg = json.loads(Path(".team/config.json").read_text())
+            cfg["gates"] = {k: {"run": v, "mode": "block"} for k, v in g.items()}
+            Path(".team/config.json").write_text(json.dumps(cfg))
+
+        # sanity fails: nothing changes, a bug is offered
+        gates(sanity="echo smoke broke; exit 1")
+        out = run("sanity", ok=False)
+        assert "smoke broke" in out and "OFFER" in out and status(paths[0]) == "done"
+        # sanity passes: story + bug become candidates, the spike stays done, a story means a minor version
+        gates(sanity="test \"$RELEASE_VERSION\" = v0.1.0", deploy="echo deployed > .git/deployed")
+        assert "PASS: v0.1.0" in run("sanity")
+        assert [status(t) for t in paths] == ["release-candidate", "release-candidate", "done", "backlog"]
+        assert "waiting for deploy" in run("sanity", ok=False)
+        assert "no release is deploying" in run("deploy", "finish", ok=False)
+
+        # deploy: the changelog must be committed, else back to candidate and nothing tagged
+        out = run("deploy", "start")
+        assert "RELEASE: v0.1.0" in out and "APP-1 story: Dark mode" in out and "APP-3" not in out
+        assert "no entry for v0.1.0" in run("deploy", "finish", ok=False)
+        assert git("tag") == ""
+        run("deploy", "start")
+        Path("CHANGELOG.md").write_text("# Changelog\n\n## v0.1.0\n- Dark mode (APP-1)\n")
+        sh("git add CHANGELOG.md && git commit -q -m 'Release v0.1.0: changelog'")
+        gates(deploy="exit 4")
+        assert "exited 4" in run("deploy", "finish", ok=False) and git("tag") == ""
+        gates(deploy="echo deployed > .git/deployed")
+        run("deploy", "start")
+        assert "PASS: released v0.1.0" in run("deploy", "finish")
+        assert git("tag") == "v0.1.0" and Path(".git/deployed").exists()
+        assert [status(t) for t in paths] == ["released", "released", "done", "backlog"]
+
+        # bugs and chores only → patch version; no sanity command → warned, not silently "checked"
+        gates()
+        paths[3].write_text(paths[3].read_text().replace("status: backlog", "status: done"))
+        out = run("sanity")
+        assert "PASS: v0.1.1" in out and "WARN: no sanity command" in out
+
+
 def check_setup():
     import os
     import urllib.request
@@ -558,6 +611,7 @@ def main():
     check_qa()
     check_gate_setup()
     check_guard()
+    check_release()
     check_setup()
     print("all checks passed")
 

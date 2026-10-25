@@ -9,6 +9,8 @@
   team.py next                   # next (stage, ticket) for the autopilot
   team.py start <stage> <ID>     # precondition, status, branch, context, executor
   team.py finish <stage> <ID>    # gates, advance or bounce
+  team.py sanity [--version vX.Y.Z]  # release: smoke-test the base branch, done → release-candidate
+  team.py deploy <start|finish>  # release: changelog executor, deploy command, tag → released
 """
 import json
 import os
@@ -23,6 +25,7 @@ TEAM = Path(".team")
 TICKETS = TEAM / "tickets"
 CONFIG = TEAM / "config.json"
 QUEUE = TEAM / "queue.json"
+RELEASES = TEAM / "releases"
 UNTRACKED = TEAM / "untracked.json"  # ticket -> untracked files that existed when its stage started
 
 # stage -> (status while running, status on fail). The pass status comes from the flow.
@@ -48,6 +51,7 @@ DEFAULT_CONFIG = {
         "build": {"agent": "sprintkit:developer"},
         "review": {"agent": "sprintkit:reviewer"},
         "qa": {"agent": "sprintkit:qa-engineer"},
+        "deploy": {"agent": "sprintkit:release-manager"},
     },
     "context": [],
     "context_by_stage": {},
@@ -559,6 +563,151 @@ def cmd_next(_):
     print("NEXT: none")
 
 
+# ---------- release: sanity + deploy ----------
+
+RELEASE_TEMPLATE = """---
+version: {version}
+status: candidate
+---
+
+## Tickets
+{tickets}
+
+## Sanity
+{sanity}
+
+## Log
+"""
+
+
+def tickets_with(status):
+    return [(p, *parse(p)) for p in ticket_files() if parse(p)[0]["status"] == status]
+
+
+def on_clean_base(cfg):
+    git("checkout", cfg["base_branch"])
+    if sh("git status --porcelain --untracked-files=no -- . ':!.team'").stdout.strip():
+        die(f"{cfg['base_branch']} has uncommitted changes; commit or stash them first")
+
+
+def next_version(metas):
+    tags = sh("git tag --list 'v*' --sort=-v:refname").stdout.split()
+    m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tags[0]) if tags else None
+    if not m:
+        return "v0.1.0"
+    major, minor, patch = map(int, m.groups())
+    if any(meta["type"] == "story" for meta in metas):  # new behavior → minor, fixes and chores → patch
+        return f"v{major}.{minor + 1}.0"
+    return f"v{major}.{minor}.{patch + 1}"
+
+
+def open_release(status):
+    for p in sorted(RELEASES.glob("v*.md")):
+        meta, body = parse(p)
+        if meta["status"] == status:
+            return p, meta, body
+    return None
+
+
+def run_release_gate(cfg, name, version):
+    gate = cfg["gates"].get(name)
+    if not gate:
+        return None
+    return sh(gate["run"], {**os.environ, "RELEASE_VERSION": version})
+
+
+def cmd_sanity(args):
+    cfg = load_config()
+    if (r := open_release("candidate") or open_release("deploying")):
+        die(f"{r[1]['version']} is waiting for deploy; run `deploy start` first")
+    done = [(p, m, b) for p, m, b in tickets_with("done") if m["type"] != "spike"]  # spikes are never released
+    if not done:
+        die("no done tickets to release (spikes don't count)")
+    version = args[args.index("--version") + 1] if "--version" in args else next_version([m for _, m, _ in done])
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", version) or sh(f"git rev-parse -q --verify refs/tags/{version}").returncode == 0:
+        die(f"version must look like v1.2.3 and not be tagged yet: {version}")
+    on_clean_base(cfg)
+
+    r = run_release_gate(cfg, "sanity", version)
+    listing = "\n".join(f"- {m['id']} {m['type']}: {m['title']}" for _, m, _ in done)
+    if r and r.returncode:
+        out = (r.stdout + r.stderr).strip()[-3000:]
+        print(f"FAIL: sanity `{cfg['gates']['sanity']['run']}` exited {r.returncode} on {cfg['base_branch']}; "
+              f"nothing changed.\nWould have released {version}:\n{listing}\n\n{out}\n\n"
+              f"OFFER: file a bug with this output: team.py new bug \"Sanity fails on {cfg['base_branch']}\"")
+        sys.exit(1)
+    sanity = f"`{cfg['gates']['sanity']['run']}` passed on {cfg['base_branch']}" if r else \
+        "no sanity command configured (gates.sanity); nothing was checked"
+    RELEASES.mkdir(exist_ok=True)
+    rel = RELEASES / f"{version}.md"
+    rel.write_text(RELEASE_TEMPLATE.format(version=version, tickets=listing, sanity=sanity))
+    meta, body = parse(rel)
+    write(rel, meta, log(meta, body, "sanity passed → candidate"))
+    for p, m, b in done:
+        m["status"] = "release-candidate"
+        write(p, m, log(m, b, f"done → release-candidate ({version})"))
+    if not r:
+        print("WARN: no sanity command configured (gates.sanity), nothing was checked")
+    print(f"PASS: {version} is a release candidate with {len(done)} ticket(s): {rel}\nNEXT: /sprintkit:release")
+
+
+def cmd_deploy(args):
+    if args not in (["start"], ["finish"]):
+        die("usage: deploy <start|finish>")
+    cfg = load_config()
+    if args == ["start"]:
+        found = open_release("candidate") or open_release("deploying")
+        if not found:
+            die("no release candidate; run `sanity` first")
+        rel, meta, body = found
+        on_clean_base(cfg)
+        resumed = meta["status"] == "deploying"
+        if not resumed:
+            meta["status"] = "deploying"
+            write(rel, meta, log(meta, body, "candidate → deploying"))
+        tags = sh("git tag --list 'v*' --sort=-v:refname").stdout.split()
+        since = f"{tags[0]}..HEAD" if tags else "HEAD"
+        print(f"RELEASE: {meta['version']}\nPATH: {rel}\nBASE: {cfg['base_branch']}\n"
+              f"RESUMED: {'yes' if resumed else 'no'}\nEXECUTOR: {json.dumps(cfg['stages'].get('deploy', {}))}")
+        print("\n### Tickets (read their notes for the changelog)")
+        for p, m, _ in tickets_with("release-candidate"):
+            print(f"- {m['id']} {m['type']}: {m['title']} ({p})")
+        print(f"\n### Commits since the last release (git log {since})\n" + git("log", "--oneline", since))
+        return
+
+    found = open_release("deploying")
+    if not found:
+        die("no release is deploying; run `deploy start` first")
+    rel, meta, body = found
+    version = meta["version"]
+    problems = []
+    changelog = sh("git show HEAD:CHANGELOG.md").stdout
+    if version not in changelog:
+        problems.append(f"CHANGELOG.md committed on {cfg['base_branch']} has no entry for {version}")
+    if sh("git status --porcelain --untracked-files=no -- . ':!.team'").stdout.strip():
+        problems.append("uncommitted changes outside .team/")
+    r = None if problems else run_release_gate(cfg, "deploy", version)
+    if r and r.returncode:  # always blocks: a failed deploy isn't a release, whatever gate_default_mode says
+        problems.append(f"deploy `{cfg['gates']['deploy']['run']}` exited {r.returncode}\n"
+                        f"{(r.stdout + r.stderr).strip()[-3000:]}")
+    if problems:
+        meta["status"] = "candidate"
+        write(rel, meta, log(meta, body, f"deploy failed → candidate: {problems[0].splitlines()[0][:100]}"))
+        print(f"FAIL: {version} not released, still a candidate")
+        for p in problems:
+            print(f"  - {p}")
+        sys.exit(1)
+    git("tag", "-a", version, "-m", f"Release {version}")
+    for p, m, b in tickets_with("release-candidate"):
+        m["status"] = "released"
+        write(p, m, log(m, b, f"release-candidate → released ({version})"))
+    meta["status"] = "released"
+    write(rel, meta, log(meta, body, f"deploying → released (tag {version})"))
+    if not r:
+        print("WARN: no deploy command configured (gates.deploy); tagged and marked released only")
+    print(f"PASS: released {version}, tagged {version}. The tag isn't pushed: `git push origin {version}` if you want it on the remote.")
+
+
 def ticket_json(cfg, path, queue=()):
     meta, body = parse(path)
     log_lines = section(body, "Log").splitlines()
@@ -673,7 +822,7 @@ def cmd_serve(args):
 def main():
     cmds = {"init": cmd_init, "new": cmd_new, "board": cmd_board,
             "start": cmd_start, "finish": cmd_finish, "serve": cmd_serve,
-            "queue": cmd_queue, "next": cmd_next}
+            "queue": cmd_queue, "next": cmd_next, "sanity": cmd_sanity, "deploy": cmd_deploy}
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         die(__doc__)
     args = sys.argv[2:]
