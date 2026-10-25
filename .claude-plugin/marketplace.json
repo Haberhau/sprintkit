@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sprintkit",
+  "description": "Run solo projects like a real dev team.",
+  "owner": {
+    "name": "Haberhau",
+    "url": "https://github.com/Haberhau"
+  },
+  "plugins": [
+    {
+      "name": "sprintkit",
+      "description": "Tickets, stages and quality gates for solo projects. Bring your own agents for every stage.",
+      "source": "./sprintkit",
+      "category": "productivity"
+    }
+  ]
+}

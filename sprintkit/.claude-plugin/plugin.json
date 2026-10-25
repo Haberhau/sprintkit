@@ -1,5 +1,9 @@
 {
   "name": "sprintkit",
   "version": "0.1.0",
-  "description": "Run solo projects like a real dev team: tickets, stages, and quality gates. Bring your own agents for every stage."
+  "description": "Run solo projects like a real dev team: tickets, stages, and quality gates. Bring your own agents for every stage.",
+  "author": {
+    "name": "Haberhau",
+    "url": "https://github.com/Haberhau"
+  }
 }
