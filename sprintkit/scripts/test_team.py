@@ -340,6 +340,21 @@ def check_gate_setup():
         out = run("finish", "build", "APP-1")
         assert "RETRY" in out and "PASS: APP-1 → done" in out
 
+        # a ticket blocked in build doesn't hold the one-at-a-time slot (found in the in-app test)
+        sh("git checkout -q main")
+        stuck = Path(run("new", "chore", "Stuck").strip())
+        run("queue", "add", "APP-2")
+        run("start", "build", "APP-2")
+        fill(stuck, "Implementation notes", "x")
+        sh("git commit -q --allow-empty -m 'APP-2 x'")
+        gate("no-such-command-xyz")
+        run("finish", "build", "APP-2", ok=False)
+        assert status(stuck) == "in-progress" and "blocked: true" in stuck.read_text()
+        run("new", "chore", "Next one")
+        run("queue", "add", "APP-3")
+        assert run("next").strip() == "NEXT: build APP-3"
+        run("start", "build", "APP-3")
+
 
 def check_guard():
     import os

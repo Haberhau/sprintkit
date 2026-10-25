@@ -268,11 +268,9 @@ def cmd_start(args):
     if meta["status"] not in allowed:
         die(f"{tid} is '{meta['status']}', {stage} needs one of: {', '.join(sorted(allowed))}")
 
+    if stage == "build" and (busy := building(tid)):
+        die(f"{busy} is already in-progress, finish it first (solo: one at a time)")
     if stage == "build":
-        for p in TICKETS.glob("*.md"):
-            m, _ = parse(p)
-            if m["id"] != tid and m["status"] == "in-progress":
-                die(f"{m['id']} is already in-progress, finish it first (solo: one at a time)")
         branch = meta.get("branch") or path.stem
         exists = sh(f"git rev-parse --verify --quiet refs/heads/{branch}").returncode == 0
         git("checkout", branch) if exists else git("checkout", "-b", branch, cfg["base_branch"])
@@ -313,6 +311,15 @@ def cmd_start(args):
         if len(out) > cap:
             out = out[:cap] + f"\n… [truncated at {cap} chars]"
         print(f"\n### Context: {c}" + (f" (exit {r.returncode})" if r.returncode else "") + f"\n{out}")
+
+
+def building(tid=None):
+    """The other ticket currently in build, if any. Blocked ones wait for a human and don't hold the slot."""
+    for p in TICKETS.glob("*.md"):
+        m, _ = parse(p)
+        if m["id"] != tid and m["status"] == "in-progress" and m.get("blocked") != "true":
+            return m["id"]
+    return None
 
 
 def builtin_gate(cfg, stage, meta, body):
@@ -581,6 +588,8 @@ def cmd_next(_):
             queue_remove(tid, q)
             print(f"BLOCKED: {tid} ({reason})")
             continue
+        if stage == "build" and building(tid):
+            continue  # another ticket holds the build slot; try the next queued ticket's stage
         print(f"NEXT: {stage} {tid}")
         return
     print("NEXT: none")
