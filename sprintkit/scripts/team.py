@@ -174,6 +174,8 @@ def cmd_init(args):
            "context": [], "gates": {}, "gate_default_mode": "warn"}
     CONFIG.write_text(json.dumps(cfg, indent=2) + "\n")
     print(f"created {CONFIG} (prefix {prefix}, base branch {base})")
+    import wizard
+    wizard.ignore_team(Path.cwd(), lambda ok, msg: print(msg))
 
 
 def cmd_new(args):

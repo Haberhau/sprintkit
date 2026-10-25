@@ -278,7 +278,7 @@ def check_qa():
         out = run("finish", "qa", "APP-2", ok=False)
         assert "BLOCKED: APP-2" in out and "total.txt" in out
         assert status(bug2) == "in-qa" and "blocked: true" in bug2.read_text()
-        assert git("branch", "--show-current") == "APP-2-wrong-total" and not git("status", "--porcelain", "--", ".", ":!.team")
+        assert git("branch", "--show-current") == "APP-2-wrong-total" and not git("status", "--porcelain", "--untracked-files=no")
         assert git("show", "main:total.txt") == "other" and run("queue").strip() == "queue is empty"
 
         # files untracked before a stage started don't count as its uncommitted work (SK-17)
@@ -395,6 +395,7 @@ def check_setup():
             git = lambda *a: subprocess.check_output(["git", *a], cwd=proj, text=True).strip()
             assert git("remote", "get-url", "origin") == "https://github.com/me/proj"
             assert git("log", "--oneline").endswith("Initial commit")
+            assert ".team/" in Path(proj, ".gitignore").read_text().splitlines()  # SK-13
 
             # after setup: the board is served, and setup can't run twice
             assert b"sprintkit board" in urllib.request.urlopen(base + "/").read()

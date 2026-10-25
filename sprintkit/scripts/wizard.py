@@ -239,11 +239,23 @@ def apply(cwd, data, config_path):
     (cwd / ".team/tickets").mkdir(parents=True, exist_ok=True)
     (cwd / config_path).write_text(json.dumps(config, indent=2) + "\n")
     step(True, "wrote .team/config.json")
+    ignore_team(cwd, step)
 
     write_plugins(cwd, plugins, step)
     build_graph(cwd, context, step)
     connect_github(cwd, gh, step)
     return steps
+
+
+def ignore_team(cwd, step):
+    """.team/ is local state: tracked ticket files block branch switches once main has newer ones (SK-13)."""
+    if run("git", "ls-files", "--error-unmatch", ".team", cwd=cwd)[0] == 0:
+        return  # the project tracks its tickets on purpose; leave it
+    gi = cwd / ".gitignore"
+    lines = gi.read_text().splitlines() if gi.exists() else []
+    if not {".team", ".team/", "/.team", "/.team/"} & set(lines):
+        gi.write_text("\n".join(lines + [".team/"]) + "\n")
+        step(True, "added .team/ to .gitignore")
 
 
 def build_graph(cwd, context, step):
