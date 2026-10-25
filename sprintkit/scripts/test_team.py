@@ -80,6 +80,14 @@ def check_server():
         assert tickets["APP-4"]["queued"] == 1 and tickets["APP-1"]["queued"] == 0
         assert req("/api/queue", json.dumps({"id": "APP-99"}).encode())[0] == 404
         assert req("/api/queue", json.dumps({"id": "../../x"}).encode())[0] == 400
+        # reorder (SK-10)
+        req("/api/queue", json.dumps({"id": "APP-3", "action": "add"}).encode())
+        code, body = req("/api/queue", json.dumps({"id": "APP-3", "action": "move", "to": 0}).encode())
+        assert code == 200 and json.loads(body)["queue"] == ["APP-3", "APP-4"]
+        assert req("/api/queue", json.dumps({"id": "APP-3", "action": "move", "to": "x"}).encode())[0] == 400
+        assert req("/api/queue", json.dumps({"id": "APP-1", "action": "move", "to": 0}).encode())[0] == 400
+        assert run("queue", "move", "APP-3", "2").strip() == "APP-4 APP-3"
+        req("/api/queue", json.dumps({"id": "APP-3", "action": "remove"}).encode())
         code, body = req("/api/queue", json.dumps({"id": "APP-4", "action": "remove"}).encode())
         assert json.loads(body)["queue"] == []
     finally:

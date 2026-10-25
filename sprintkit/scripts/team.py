@@ -5,7 +5,7 @@
   team.py new <story|bug|chore|spike> "<title>"
   team.py board                  # text board
   team.py serve [--port 7700]    # live board in the browser
-  team.py queue [add|remove <ID>]  # sprint queue for the autopilot
+  team.py queue [add|remove <ID> | move <ID> <position>]  # sprint queue for the autopilot
   team.py next                   # next (stage, ticket) for the autopilot
   team.py start <stage> <ID>     # precondition, status, branch, context, executor
   team.py finish <stage> <ID>    # gates, advance or bounce
@@ -507,11 +507,26 @@ def queue_remove(tid, q=None):
         QUEUE.write_text(json.dumps(q) + "\n")
 
 
+def queue_move(tid, to):
+    """Move a queued ticket to position `to` (0-based, clamped)."""
+    q = read_queue()
+    if tid not in q:
+        raise ValueError(f"{tid} isn't in the queue")
+    q.remove(tid)
+    q.insert(max(0, min(to, len(q))), tid)
+    QUEUE.write_text(json.dumps(q) + "\n")
+
+
 def cmd_queue(args):
     if len(args) == 2 and args[0] in ("add", "remove"):
         (queue_add if args[0] == "add" else queue_remove)(args[1])
+    elif len(args) == 3 and args[0] == "move" and args[2].isdigit() and int(args[2]) >= 1:
+        try:
+            queue_move(args[1], int(args[2]) - 1)
+        except ValueError as e:
+            die(str(e))
     elif args:
-        die("usage: queue [add|remove <ID>]")
+        die("usage: queue [add|remove <ID> | move <ID> <position from 1>]")
     print(" ".join(read_queue()) or "queue is empty")
 
 
@@ -857,6 +872,10 @@ def cmd_serve(args):
                         raise ValueError("bad ticket id")
                     if data.get("action") == "remove":
                         queue_remove(tid)
+                    elif data.get("action") == "move":
+                        if not isinstance(data.get("to"), int):
+                            raise ValueError("move needs an integer 'to'")
+                        queue_move(tid, data["to"])
                     else:
                         queue_add(tid)
                     return self.reply(200, {"queue": read_queue()})

@@ -78,6 +78,9 @@
   .chip > span { white-space: nowrap; }
   .chip .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .chip button { border: 0; padding: 0 6px; background: transparent; color: var(--muted); }
+  .chip[draggable="true"] { cursor: grab; }
+  .chip.dragging { opacity: .5; }
+  .chip.drop-before { box-shadow: -3px 0 0 var(--accent); }
   #queue .run { margin-left: auto; font-size: 12px; padding: 4px 10px; }
   .card[draggable="true"] { cursor: grab; }
   .card.dragging { opacity: .5; }
@@ -170,8 +173,11 @@ function renderQueue(data) {
   const chips = data.queue.map((id, i) => {
     const t = byId[id] || { title: "", next: "" };
     const stage = t.next ? t.next.split(" ")[0].replace("/sprintkit:", "") : "";
-    return `<span class="chip"><span class="n">${i + 1}.</span><span class="id">${esc(id)}</span>
+    const last = i === data.queue.length - 1;
+    return `<span class="chip" draggable="true" data-chip="${esc(id)}" data-pos="${i}"><span class="n">${i + 1}.</span><span class="id">${esc(id)}</span>
       <span class="t">${esc(t.title)}</span>${stage ? `<span class="hint">· ${esc(stage)}</span>` : ""}
+      ${i ? `<button data-move="${esc(id)}" data-to="${i - 1}" aria-label="Move ${esc(id)} earlier" title="Earlier">‹</button>` : ""}
+      ${last ? "" : `<button data-move="${esc(id)}" data-to="${i + 1}" aria-label="Move ${esc(id)} later" title="Later">›</button>`}
       <button data-unqueue="${esc(id)}" aria-label="Remove ${esc(id)} from queue">✕</button></span>`;
   }).join("");
   $("queue").innerHTML = `<h2>Sprint queue</h2>${chips ||
@@ -246,27 +252,38 @@ async function poll() {
   }
 }
 
-async function queueAction(id, action) {
+async function queueAction(id, action, to) {
   const r = await fetch("/api/queue", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, action }) });
+    body: JSON.stringify({ id, action, to }) });
   if (!r.ok) toast((await r.json()).error);
   poll();
 }
 
+// cards dragged in are added; chips dragged within the lane are reordered ("chip:" marks those)
 document.addEventListener("dragstart", (e) => {
-  const card = e.target.closest?.(".card");
-  if (!card) return;
-  e.dataTransfer.setData("text/plain", card.dataset.id);
-  card.classList.add("dragging");
+  const item = e.target.closest?.(".card, .chip");
+  if (!item) return;
+  e.dataTransfer.setData("text/plain", item.dataset.chip ? `chip:${item.dataset.chip}` : item.dataset.id);
+  item.classList.add("dragging");
 });
 document.addEventListener("dragend", (e) => e.target.classList?.remove("dragging"));
 const q = $("queue");
-q.addEventListener("dragover", (e) => { e.preventDefault(); q.classList.add("over"); });
-q.addEventListener("dragleave", () => q.classList.remove("over"));
+const clearMarks = () => q.querySelectorAll(".drop-before").forEach((c) => c.classList.remove("drop-before"));
+q.addEventListener("dragover", (e) => {
+  e.preventDefault(); q.classList.add("over"); clearMarks();
+  e.target.closest(".chip")?.classList.add("drop-before");
+});
+q.addEventListener("dragleave", (e) => { if (!q.contains(e.relatedTarget)) { q.classList.remove("over"); clearMarks(); } });
 q.addEventListener("drop", (e) => {
-  e.preventDefault(); q.classList.remove("over");
-  const id = e.dataTransfer.getData("text/plain");
-  if (id) queueAction(id, "add");
+  e.preventDefault(); q.classList.remove("over"); clearMarks();
+  const data = e.dataTransfer.getData("text/plain");
+  const target = e.target.closest(".chip");
+  if (data.startsWith("chip:")) {
+    const id = data.slice(5), from = +q.querySelector(`[data-chip="${CSS.escape(id)}"]`).dataset.pos;
+    let to = target ? +target.dataset.pos : q.querySelectorAll(".chip").length - 1;
+    if (target && from < to) to -= 1;  // dropping before a later chip: it moves up once this one leaves
+    if (to !== from) queueAction(id, "move", to);
+  } else if (data) queueAction(data, "add");
 });
 
 document.addEventListener("click", (e) => {
@@ -274,6 +291,8 @@ document.addEventListener("click", (e) => {
   if (add) { e.stopPropagation(); return queueAction(add.dataset.queue, "add"); }
   const remove = e.target.closest("[data-unqueue]");
   if (remove) return queueAction(remove.dataset.unqueue, "remove");
+  const move = e.target.closest("[data-move]");
+  if (move) return queueAction(move.dataset.move, "move", +move.dataset.to);
   const next = e.target.closest(".next");
   if (next) { e.stopPropagation(); return copyNext(next.dataset.cmd); }
   const card = e.target.closest(".card");
