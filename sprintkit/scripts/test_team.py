@@ -300,6 +300,7 @@ def check_qa():
         out = run("finish", "build", "APP-3", ok=False)
         assert "forgot.txt" in out and "notes-before.txt" not in out
         Path("forgot.txt").unlink()
+        assert "READY: yes" in run("start", "build", "APP-3")  # resumed with passing output: no executor rerun
         Path("graphify-out/cache").mkdir(parents=True, exist_ok=True)
         Path("graphify-out/cache/new.json").write_text("{}")  # graph refreshed during the build: generated, not work
         assert "PASS: APP-3 → done" in run("finish", "build", "APP-3")

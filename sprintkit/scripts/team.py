@@ -293,6 +293,11 @@ def cmd_start(args):
     executor = cfg["stages"].get(stage, {})
     print(f"TICKET: {tid}\nPATH: {path}\nSTAGE: {stage}\nRESUMED: {'yes' if resumed else 'no'}\n"
           f"RUNNER: python3 \"{Path(__file__).resolve()}\"")
+    if resumed and not builtin_gate(cfg, stage, meta, body):
+        # an earlier attempt already produced passing output (e.g. it was blocked by the environment): no rerun needed
+        gate = cfg["gates"].get(stage)
+        if not gate or sh(gate["run"], ticket_env(meta, path)).returncode == 0:
+            print("READY: yes (the earlier attempt's output passes the gate; go straight to finish)")
     if meta.get("branch"):
         print(f"BRANCH: {meta['branch']}\nBASE: {cfg['base_branch']}")
     print("EXECUTOR: " + json.dumps(executor))

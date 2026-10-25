@@ -7,7 +7,7 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(pytho
 
 1. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" start build $ARGUMENTS`. If it errors, show the error and stop.
 
-2. Read `EXECUTOR` from the output and hand the work over. The executor must produce: code (committed with the ticket ID) and Implementation notes. It must not edit `status`, `branch` or `## Log`.
+2. If the output has `READY: yes`, an earlier attempt's output already passes the gate: skip to step 3. Otherwise read `EXECUTOR` from the output and hand the work over. The executor must produce: code (committed with the ticket ID) and Implementation notes. It must not edit `status`, `branch` or `## Log`.
    - `{"agent": "X"}`: call the Agent tool with `subagent_type: X`. The prompt is the full output of step 1 plus "Do the build stage for this ticket." If the executor also lists `"skills"`, tell the agent to use them.
      If the Agent tool says that agent type doesn't exist and X starts with `sprintkit:` (the plugin was installed or updated after this session started, so its agents aren't registered yet), call it with `subagent_type: general-purpose` instead, and put the full text of `${CLAUDE_PLUGIN_ROOT}/agents/<name after "sprintkit:">.md` (without its frontmatter) at the top of the prompt. Mention once that a new session would load the agents directly.
    - `{"skill": "X"}`: invoke skill X with the ticket path as its argument, and do the work it describes yourself, writing only the outputs above.
