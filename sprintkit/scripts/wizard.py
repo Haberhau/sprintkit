@@ -254,9 +254,20 @@ def ignore_team(cwd, step):
         return  # the project tracks its tickets on purpose; leave it
     gi = cwd / ".gitignore"
     lines = gi.read_text().splitlines() if gi.exists() else []
-    if not {".team", ".team/", "/.team", "/.team/"} & set(lines):
-        gi.write_text("\n".join(lines + [".team/"]) + "\n")
-        step(True, "added .team/ to .gitignore")
+    if {".team", ".team/", "/.team", "/.team/"} & set(lines):
+        return
+    tracked = run("git", "ls-files", "--error-unmatch", ".gitignore", cwd=cwd)[0] == 0
+    clean = tracked and not run("git", "status", "--porcelain", "--", ".gitignore", cwd=cwd)[1]
+    gi.write_text("\n".join(lines + [".team/"]) + "\n")
+    # commit it, or every build gate trips over the edited file; never sweep in the user's own uncommitted edits
+    if (clean or not lines) and run("git", "rev-parse", "--verify", "HEAD", cwd=cwd)[0] == 0:
+        if not tracked:
+            run("git", "add", ".gitignore", cwd=cwd)
+        code, out = run("git", "commit", "-m", "Ignore .team/ (sprintkit)", "--", ".gitignore", cwd=cwd)
+        step(code == 0, "added .team/ to .gitignore and committed it" if code == 0
+             else f"added .team/ to .gitignore, commit failed (commit it yourself): {out[-200:]}")
+    else:
+        step(True, "added .team/ to .gitignore (commit it yourself: it had other uncommitted changes)")
 
 
 def build_graph(cwd, context, step):

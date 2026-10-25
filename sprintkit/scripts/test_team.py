@@ -503,6 +503,7 @@ def check_setup():
             assert git("remote", "get-url", "origin") == "https://github.com/me/proj"
             assert git("log", "--oneline").endswith("Initial commit")
             assert ".team/" in Path(proj, ".gitignore").read_text().splitlines()  # SK-13
+            assert not git("status", "--porcelain", "--", ".gitignore")  # committed, so build gates don't trip on it
 
             # after setup: the board is served, and setup can't run twice
             assert b"sprintkit board" in urllib.request.urlopen(base + "/").read()

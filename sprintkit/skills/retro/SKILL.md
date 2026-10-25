@@ -9,6 +9,7 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *), Bash(pytho
 
 2. Read `EXECUTOR` from the output and hand the work over. The executor must produce: the retro file at `PATH`, ending with a `## Process change` section holding one concrete change. It must not edit tickets, config or code.
    - `{"agent": "X"}`: call the Agent tool with `subagent_type: X`. The prompt is the full output of step 1 plus "Write the retro for this release." If the executor also lists `"skills"`, tell the agent to use them.
+     If the Agent tool says that agent type doesn't exist and X starts with `sprintkit:` (the plugin was installed or updated after this session started, so its agents aren't registered yet), call it with `subagent_type: general-purpose` instead, and put the full text of `${CLAUDE_PLUGIN_ROOT}/agents/<name after "sprintkit:">.md` (without its frontmatter) at the top of the prompt. Mention once that a new session would load the agents directly.
    - `{"skill": "X"}`: invoke skill X with the retro path as its argument, and do the work it describes yourself, writing only the output above.
    - `{"command": "C"}`: run C with RELEASE_VERSION exported from step 1's output.
    - `{"human": true}`: tell the user to write the file at `PATH` and run `/sprintkit:retro` again, then stop if the file doesn't exist yet; otherwise go to step 3.
