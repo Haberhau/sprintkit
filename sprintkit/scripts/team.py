@@ -160,6 +160,14 @@ def sh(cmd, env=None):
     return subprocess.run(cmd, shell=True, env=env, capture_output=True, text=True)
 
 
+def git_try(*args):
+    """git with an argument list (no shell): ticket fields can come from a cloned repo, so they never reach a shell."""
+    return subprocess.run(["git", *args], capture_output=True, text=True)
+
+
+SAFE_REF = re.compile(r"[A-Za-z0-9][\w./-]*")  # branch names and ticket ids: no leading '-', no shell characters
+
+
 def git(*args):
     r = subprocess.run(["git", *args], capture_output=True, text=True)
     if r.returncode:
@@ -272,12 +280,14 @@ def cmd_start(args):
         die(f"{busy} is already in-progress, finish it first (solo: one at a time)")
     if stage == "build":
         branch = meta.get("branch") or path.stem
-        exists = sh(f"git rev-parse --verify --quiet refs/heads/{branch}").returncode == 0
+        if not SAFE_REF.fullmatch(branch):
+            die(f"{tid}: refusing branch name {branch!r} (letters, digits, '_', '.', '/', '-' only)")
+        exists = git_try("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
         git("checkout", branch) if exists else git("checkout", "-b", branch, cfg["base_branch"])
         meta["branch"] = branch
     if stage in ("review", "qa"):
-        if not meta.get("branch"):
-            die(f"{tid} has no branch to {stage}")
+        if not SAFE_REF.fullmatch(meta.get("branch", "")):
+            die(f"{tid} has no usable branch to {stage}: {meta.get('branch', '')!r}")
         git("checkout", meta["branch"])  # so the executor reads and runs the code under test
 
     resumed = meta["status"] == running
@@ -338,8 +348,8 @@ def builtin_gate(cfg, stage, meta, body):
         if not meta.get("points", "").isdigit():
             problems.append("frontmatter 'points' not set")
     if stage == "build":
-        id_re = f"{meta['id']}([^0-9]|$)"  # PROJ-1 must not match PROJ-12
-        if not sh(f"git log {cfg['base_branch']}..HEAD --oneline -E --grep='{id_re}'").stdout.strip():
+        id_re = f"{re.escape(meta['id'])}([^0-9]|$)"  # PROJ-1 must not match PROJ-12
+        if not git_try("log", f"{cfg['base_branch']}..HEAD", "--oneline", "-E", f"--grep={id_re}").stdout.strip():
             problems.append(f"no commit on {meta['branch']} mentions {meta['id']}")
         if left := uncommitted(meta):
             problems.append(f"uncommitted changes outside .team/: {', '.join(left[:5])}")
@@ -661,7 +671,7 @@ def cmd_sanity(args):
     if not done:
         die("no done tickets to release (spikes don't count)")
     version = args[args.index("--version") + 1] if "--version" in args else next_version([m for _, m, _ in done])
-    if not re.fullmatch(r"v\d+\.\d+\.\d+", version) or sh(f"git rev-parse -q --verify refs/tags/{version}").returncode == 0:
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", version) or git_try("rev-parse", "-q", "--verify", f"refs/tags/{version}").returncode == 0:
         die(f"version must look like v1.2.3 and not be tagged yet: {version}")
     on_clean_base(cfg)
 

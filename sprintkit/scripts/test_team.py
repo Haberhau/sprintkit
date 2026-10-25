@@ -643,6 +643,14 @@ def main():
         run("start", "build", "APP-3")
         assert not Path("pwned").exists()
 
+        # a crafted branch field (e.g. from a cloned repo's tickets) never reaches a shell or git options
+        evil = Path(run("new", "chore", "Evil").strip())
+        evil.write_text(evil.read_text().replace("blocked: false", "blocked: false\nbranch: x;touch pwned2", 1))
+        sh("git checkout -q main")
+        run("start", "build", "APP-4", ok=False)
+        assert not Path("pwned2").exists()
+        evil.unlink()
+
         board = run("board")
         assert "IN-REVIEW (2)" in board and "IN-PROGRESS (1)" in board
         check_server()
