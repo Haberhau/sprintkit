@@ -7,7 +7,7 @@ sprintkit owns the **process**. You choose **who** does each stage: the shipped 
 backlog ─refine─▶ refined ─build─▶ in-review ─review─▶ in-qa ─qa─▶ done ─sanity─▶ ─deploy─▶ released
 ```
 
-MVP status: `refine`, `build`, `review`, `qa` (merges into the base branch on pass), `sanity` + `deploy` (`/sprintkit:release`), the live board and the sprint autopilot work end to end. `retro` is specified in [docs/stage-contract.md](../docs/stage-contract.md) and not built yet.
+MVP status: `refine`, `build`, `review`, `qa` (merges into the base branch on pass), `sanity` + `deploy` (`/sprintkit:release`), `retro`, the live board and the sprint autopilot work end to end. The full contract is in [docs/stage-contract.md](../docs/stage-contract.md).
 
 ## Try it
 
@@ -23,6 +23,7 @@ Then, in your project:
 /sprintkit:review APP-1
 /sprintkit:qa APP-1
 /sprintkit:release
+/sprintkit:retro
 /sprintkit:board
 ```
 
@@ -73,6 +74,8 @@ The server only listens on 127.0.0.1, rejects other `Host` headers, and only acc
 2. **Deploy**: the release-manager agent writes and commits a `CHANGELOG.md` entry, then the runner runs `gates.deploy`, tags the version and marks the tickets released. The tag isn't pushed.
 
 The version is the last `v*` tag bumped: minor when a story is included, patch otherwise, or `/sprintkit:release v2.0.0`. Release commands get `RELEASE_VERSION` in their environment.
+
+`/sprintkit:retro` looks back on the latest release: the runner counts bounce-backs, gate failures, blocks and hours per ticket from their Logs, and the scrum-master agent writes `.team/retros/<version>.md` with one concrete process change, which you can apply or not.
 
 ## Guard
 

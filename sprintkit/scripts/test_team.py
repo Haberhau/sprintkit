@@ -409,6 +409,20 @@ def check_release():
         assert git("tag") == "v0.1.0" and Path(".git/deployed").exists()
         assert [status(t) for t in paths] == ["released", "released", "done", "backlog"]
 
+        # retro: numbers from the Logs, the file must hold a process change (SK-8)
+        story = paths[0]
+        story.write_text(story.read_text().replace("## Log\n", "## Log\n- 2026-10-01T10:00 refined → in-progress (build)\n"
+            "- 2026-10-01T11:00 review gate failed → refined: reviewer asked for changes\n- 2026-10-01T13:30 testing → done\n"))
+        out = run("retro", "start")
+        assert "RELEASE: v0.1.0" in out and "| APP-1 Dark mode | story | 1 | 1 | 0 | 0 | 3.5 |" in out
+        assert "APP-3" not in out  # the spike wasn't released
+        assert "doesn't exist" in run("retro", "finish", ok=False)
+        Path(".team/retros/v0.1.0.md").write_text("# Retro v0.1.0\n\n## Went well\n- all\n")
+        assert "Process change" in run("retro", "finish", ok=False)
+        Path(".team/retros/v0.1.0.md").write_text("# Retro v0.1.0\n\n## Process change\nAdd a blocking build gate.\n")
+        assert "PASS" in run("retro", "finish")
+        assert "isn't released" in run("retro", "start", "v9.9.9", ok=False)
+
         # bugs and chores only → patch version; no sanity command → warned, not silently "checked"
         gates()
         paths[3].write_text(paths[3].read_text().replace("status: backlog", "status: done"))

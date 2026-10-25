@@ -11,6 +11,7 @@
   team.py finish <stage> <ID>    # gates, advance or bounce
   team.py sanity [--version vX.Y.Z]  # release: smoke-test the base branch, done → release-candidate
   team.py deploy <start|finish>  # release: changelog executor, deploy command, tag → released
+  team.py retro <start|finish> [vX.Y.Z]  # per release: numbers from the Logs, executor writes the retro
 """
 import json
 import os
@@ -26,6 +27,7 @@ TICKETS = TEAM / "tickets"
 CONFIG = TEAM / "config.json"
 QUEUE = TEAM / "queue.json"
 RELEASES = TEAM / "releases"
+RETROS = TEAM / "retros"
 UNTRACKED = TEAM / "untracked.json"  # ticket -> untracked files that existed when its stage started
 
 # stage -> (status while running, status on fail). The pass status comes from the flow.
@@ -52,6 +54,7 @@ DEFAULT_CONFIG = {
         "review": {"agent": "sprintkit:reviewer"},
         "qa": {"agent": "sprintkit:qa-engineer"},
         "deploy": {"agent": "sprintkit:release-manager"},
+        "retro": {"agent": "sprintkit:scrum-master"},
     },
     "context": [],
     "context_by_stage": {},
@@ -708,6 +711,64 @@ def cmd_deploy(args):
     print(f"PASS: released {version}, tagged {version}. The tag isn't pushed: `git push origin {version}` if you want it on the remote.")
 
 
+# ---------- retro ----------
+
+def ticket_stats(body):
+    """Process numbers from a ticket's Log: bounce-backs, gate failures, blocks, cycle time."""
+    lines = section(body, "Log").splitlines()
+    stamps = [datetime.strptime(l[2:18], "%Y-%m-%dT%H:%M") for l in lines if re.match(r"- \d{4}-\d\d-\d\dT\d\d:\d\d ", l)]
+    began = next((datetime.strptime(l[2:18], "%Y-%m-%dT%H:%M") for l in lines
+                  if re.search(r"\((refine|build)\)$", l)), None)
+    ended = next((datetime.strptime(l[2:18], "%Y-%m-%dT%H:%M") for l in lines if l.endswith("→ done")), None)
+    hours = round((ended - began).total_seconds() / 3600, 1) if began and ended else None
+    return {"bounces": sum("gate failed → refined" in l for l in lines),
+            "gate_failures": sum(" gate failed" in l and " WARN " not in l for l in lines),
+            "warnings": sum(" WARN " in l for l in lines),
+            "blocked": sum(" blocked: " in l for l in lines),
+            "hours": hours, "log_lines": len(stamps)}
+
+
+def cmd_retro(args):
+    if not args or args[0] not in ("start", "finish") or len(args) > 2:
+        die("usage: retro <start|finish> [vX.Y.Z]")
+    cfg = load_config()
+    released = sorted((parse(p)[0]["version"] for p in RELEASES.glob("v*.md") if parse(p)[0]["status"] == "released"),
+                      key=lambda v: tuple(map(int, re.findall(r"\d+", v))))
+    version = args[1] if len(args) == 2 else (released[-1] if released else None)
+    if version not in released:
+        die(f"{version} isn't released" if len(args) == 2 else "nothing released yet; run /sprintkit:release first")
+    rel = RELEASES / f"{version}.md"
+    rmeta, rbody = parse(rel)
+    out = RETROS / f"{version}.md"
+    if args[0] == "finish":
+        problems = [] if out.exists() else [f"{out} doesn't exist"]
+        if out.exists() and not section(out.read_text(), "Process change"):
+            problems.append("the retro needs a non-empty '## Process change' section")
+        if problems:
+            print(f"FAIL: retro for {version}")
+            for p in problems:
+                print(f"  - {p}")
+            sys.exit(1)
+        write(rel, rmeta, log(rmeta, rbody, f"retro written: {out}"))
+        print(f"PASS: retro for {version} is in {out}")
+        return
+
+    RETROS.mkdir(exist_ok=True)
+    print(f"RELEASE: {version}\nPATH: {out}\nEXECUTOR: {json.dumps(cfg['stages'].get('retro', {}))}")
+    print("\n### Numbers per ticket (from the Logs)\n| ticket | type | bounce-backs | gate failures | warnings | blocked | hours |\n|---|---|---|---|---|---|---|")
+    logs = []
+    for tid in re.findall(r"^- (\S+) ", section(rbody, "Tickets"), re.M):
+        hits = list(TICKETS.glob(f"{tid}-*.md"))
+        if not hits:
+            continue
+        meta, body = parse(hits[0])
+        st = ticket_stats(body)
+        print(f"| {tid} {meta['title']} | {meta['type']} | {st['bounces']} | {st['gate_failures']} | {st['warnings']} | "
+              f"{st['blocked']} | {st['hours'] if st['hours'] is not None else '?'} |")
+        logs.append(f"\n### {tid} Log ({hits[0]})\n{section(body, 'Log')}")
+    print("".join(logs))
+
+
 def ticket_json(cfg, path, queue=()):
     meta, body = parse(path)
     log_lines = section(body, "Log").splitlines()
@@ -822,7 +883,8 @@ def cmd_serve(args):
 def main():
     cmds = {"init": cmd_init, "new": cmd_new, "board": cmd_board,
             "start": cmd_start, "finish": cmd_finish, "serve": cmd_serve,
-            "queue": cmd_queue, "next": cmd_next, "sanity": cmd_sanity, "deploy": cmd_deploy}
+            "queue": cmd_queue, "next": cmd_next, "sanity": cmd_sanity, "deploy": cmd_deploy,
+            "retro": cmd_retro}
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         die(__doc__)
     args = sys.argv[2:]

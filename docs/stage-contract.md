@@ -160,13 +160,15 @@ Every stage follows the same run sequence:
 | **Pass →** | tag created, tickets → `released` |
 | **Fail →** | release back to candidate, nothing tagged |
 
-### `retro` (sprint-level, optional)
+### `retro` (release-level, optional)
 | | |
 |---|---|
-| **Input** | `## Log` sections of all sprint tickets (bounce-backs, gate failures, durations) |
-| **Output** | `sprints/<n>/retro.md`: what went well, what bounced, one concrete process change |
-| **Default executor** | `product-owner` agent |
-| **Gate** | none |
+| **Input** | numbers the runner computes from the `## Log` sections of the release's tickets (bounce-backs, gate failures, warnings, blocks, hours from start to done) plus the Logs |
+| **Output** | `.team/retros/<version>.md`: numbers, what went well, what bounced, one concrete process change |
+| **Default executor** | `scrum-master` agent |
+| **Gate** | file exists with a non-empty `## Process change` section |
+
+Per release rather than per sprint: sprintkit has a queue, not sprint objects, and a release is the batch that was actually finished together.
 
 ---
 
