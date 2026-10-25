@@ -9,7 +9,7 @@ You are running the sprint on autopilot. Don't ask the user anything between tic
 Loop:
 
 1. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" next`.
-   - It may print `DEQUEUED: …` (ticket has gone as far as the autopilot can take it) or `BLOCKED: …` (gate failed too often, the stage needs a human, or QA passed but the merge conflicts) lines first. Mention each in one line.
+   - It may print `DEQUEUED: …` (ticket has gone as far as the autopilot can take it) or `BLOCKED: …` (gate failed too often, the stage needs a human, QA passed but the merge conflicts, or a gate couldn't run at all) lines first. Mention each in one line.
    - `NEXT: none`: go to step 3.
    - `NEXT: <stage> <ID>`: go to step 2.
 

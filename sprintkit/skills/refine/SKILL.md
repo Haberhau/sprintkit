@@ -17,4 +17,5 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
 3. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" finish refine $ARGUMENTS`.
    - PASS: say so in one line and name the `NEXT:` command from the output.
    - FAIL: list the problems. The ticket has already been moved to its fail status. Offer to run the stage again.
+   - BLOCKED: the gate command couldn't run (missing tool, wrong simulator), so it's not the executor's fault. Show the reason and say the gate in `.team/config.json` or the environment needs fixing.
    - WARN lines: mention them. The ticket advanced anyway because that gate's mode is warn.

@@ -295,6 +295,42 @@ def check_qa():
         assert "PASS: APP-3 → done" in run("finish", "build", "APP-3")
 
 
+def check_gate_setup():
+    import os
+    with tempfile.TemporaryDirectory() as d:
+        os.chdir(d)
+        sh("git init -q -b main && git config user.email t@t && git config user.name t "
+           "&& git commit -q --allow-empty -m init")
+        run("init", "--prefix", "APP")
+        chore = Path(run("new", "chore", "Bump").strip())
+        run("queue", "add", "APP-1")
+        run("start", "build", "APP-1")
+        fill(chore, "Implementation notes", "Bumped.")
+        sh("git commit -q --allow-empty -m 'APP-1 bump'")
+
+        def gate(cmd):
+            cfg = json.loads(Path(".team/config.json").read_text())
+            cfg["gates"] = {"build": {"run": cmd, "mode": "block"}}
+            Path(".team/config.json").write_text(json.dumps(cfg))
+
+        # a missing command is a setup problem: blocked for a human, not counted as a failed attempt
+        gate("no-such-command-xyz")
+        out = run("finish", "build", "APP-1", ok=False)
+        assert "BLOCKED: APP-1" in out and "command not found" in out
+        assert status(chore) == "in-progress" and "blocked: true" in chore.read_text()
+        assert run("queue").strip() == "queue is empty" and "gate failed" not in chore.read_text()
+
+        # a failing test is still a normal gate failure
+        gate("echo '1 test failed'; exit 1")
+        out = run("finish", "build", "APP-1", ok=False)
+        assert "FAIL: APP-1" in out and "setup problem" not in out
+
+        # a flaky simulator launch is retried once
+        gate("if [ -f .git/once ]; then exit 0; fi; touch .git/once; echo 'Failed to launch app on simulator'; exit 65")
+        out = run("finish", "build", "APP-1")
+        assert "RETRY" in out and "PASS: APP-1 → done" in out
+
+
 def check_setup():
     import os
     import urllib.request
@@ -487,6 +523,7 @@ def main():
     check_autopilot()
     check_review()
     check_qa()
+    check_gate_setup()
     check_setup()
     print("all checks passed")
 

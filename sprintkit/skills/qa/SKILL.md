@@ -17,5 +17,5 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
 3. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/team.py" finish qa $ARGUMENTS`.
    - PASS: the branch is merged into the base branch and the ticket is done. Say so in one line.
    - FAIL: list the problems. The ticket is back in `refined`; the next build gets the QA notes. Offer `/sprintkit:build <ID>`.
-   - BLOCKED: QA passed but the merge conflicts. Show the conflicting files and the runner's instructions; nothing was merged.
+   - BLOCKED: either QA passed but the merge conflicts (show the conflicting files and the runner's instructions; nothing was merged), or the gate command couldn't run (missing tool, wrong simulator): show the reason and say the gate or environment needs fixing.
    - WARN lines: mention them. The ticket advanced anyway because that gate's mode is warn.

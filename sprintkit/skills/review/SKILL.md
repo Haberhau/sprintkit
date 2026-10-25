@@ -18,4 +18,5 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/team.py *)
    - PASS: say so in one line and name the `NEXT:` command if the output has one.
    - FAIL with "asked for changes": list the must-fix items from Review notes. The ticket is back in `refined`; the next build gets the notes. Offer `/sprintkit:build <ID>`.
    - FAIL with a missing verdict: the ticket is back in `in-review`. Offer to run the review again.
+   - BLOCKED: the gate command couldn't run (missing tool, wrong simulator), so it's not the executor's fault. Show the reason and say the gate in `.team/config.json` or the environment needs fixing.
    - WARN lines: mention them. The ticket advanced anyway because that gate's mode is warn.

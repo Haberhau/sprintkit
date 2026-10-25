@@ -243,6 +243,8 @@ flows:                          # override §5
   bug: [build, qa]
 ```
 
+**Setup failures aren't test failures.** Exit 127/126, or output that can only come from the environment (xcodebuild can't find the destination, the simulator or test runner fails to start), is reported as a setup problem. A flaky simulator start is retried once. In `block` mode a setup problem blocks the ticket for a human instead of bouncing it, and doesn't count as a failed attempt.
+
 **Ticket data is passed to commands as env vars only** (`TICKET_ID`, `TICKET_TITLE`,
 `TICKET_PATH`, `TICKET_BRANCH`, `TICKET_TYPE`), never string-interpolated into the
 command. A title like `"; rm -rf ~` must stay a harmless string.

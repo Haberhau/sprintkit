@@ -370,6 +370,28 @@ def merge(cfg, meta):
     return files
 
 
+# (gate output pattern, what it means, worth one retry). Only patterns that can't be a failing test:
+# xcodebuild exits 65 for failed tests and flaky simulator launches alike, so exit codes alone don't tell.
+SETUP_PROBLEMS = [
+    (r"Unable to find a (destination|device) matching", "the gate's destination/simulator doesn't exist", False),
+    (r"(Failed to (launch|boot|install)|failed to initialize|Early unexpected exit|preflight checks|"
+     r"Simulator device failed|Test runner exited)", "the simulator or test runner failed to start", True),
+]
+
+
+def gate_setup_problem(r):
+    """Why a failed gate is an environment problem rather than failing tests, as (meaning, retry), or None."""
+    if r.returncode == 127:
+        return ("command not found", False)
+    if r.returncode == 126:
+        return ("command isn't executable", False)
+    out = r.stdout + r.stderr
+    for pattern, meaning, retry in SETUP_PROBLEMS:
+        if re.search(pattern, out):
+            return (meaning, retry)
+    return None
+
+
 def verdict(body):
     lines = section(body, "Review notes").splitlines()
     m = re.search(r"VERDICT:\s*(approve|changes)\b", lines[-1], re.I) if lines else None
@@ -392,12 +414,25 @@ def cmd_finish(args):
     gate = cfg["gates"].get(stage)
     if gate and not problems:
         r = sh(gate["run"], ticket_env(meta, path))
+        if r.returncode and (setup := gate_setup_problem(r)) and setup[1]:
+            print(f"RETRY: gate failed with what looks like a flaky setup problem ({setup[0]}), running it once more")
+            r = sh(gate["run"], ticket_env(meta, path))
         if r.returncode:
             out = (r.stdout + r.stderr).strip()
             if len(out) > 3000:  # real errors are often at the top (xcodebuild), summaries at the bottom
                 out = out[:1500] + "\n… [middle truncated] …\n" + out[-1500:]
-            msg = f"gate `{gate['run']}` exited {r.returncode}\n{out}"
             mode = gate.get("mode", cfg["gate_default_mode"])
+            setup = gate_setup_problem(r)
+            if setup and mode == "block":
+                # the executor can't fix the environment: block for a human instead of bouncing the ticket
+                reason = f"{stage} gate couldn't run ({setup[0]}), not a test failure"
+                block(path, meta, body, reason)
+                queue_remove(tid)
+                print(f"BLOCKED: {tid}: {reason}. Fix the gate command in .team/config.json or the environment, "
+                      f"then run {stage} again.\n{out}")
+                sys.exit(1)
+            label = f" (setup problem, not a test failure: {setup[0]})" if setup else ""
+            msg = f"gate `{gate['run']}` exited {r.returncode}{label}\n{out}"
             (problems if mode == "block" else warnings).append(msg)
 
     for w in warnings:
