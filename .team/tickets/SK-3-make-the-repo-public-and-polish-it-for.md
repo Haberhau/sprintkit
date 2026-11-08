@@ -2,7 +2,7 @@
 id: SK-3
 type: chore
 title: Make the repo public and polish it for the CV
-status: backlog
+status: done
 blocked: false
 ---
 
@@ -15,7 +15,7 @@ Repo is private for now. Before going public: README with a demo GIF of a sprint
 
 ## Implementation notes
 - **Done**: root `README.md` (why, how it works, install, quick start, links) and `docs/demo.gif`: a real sprint on the live board, driven through `team.py` with scripted executor output and captured with headless Chrome (two stories reach done, one bounces at review, a bug bounces at QA). The plugin README's install section now leads with the marketplace and says `--plugin-dir` is terminal-only.
-- **Left for the owner**: flipping the repo to public, and picking a license (none yet; a public repo without one is all-rights-reserved).
+- **Done by owner**: repo is public, MIT license added (root and `sprintkit/`), repo description and topics set, `v0.2.7` tagged.
 
 ## Review notes
 
@@ -23,3 +23,4 @@ Repo is private for now. Before going public: README with a demo GIF of a sprint
 
 ## Log
 - 2026-10-23T20:05 created → backlog
+- 2026-11-08T17:14 backlog → done (license, repo metadata, v0.2.7 tag)
